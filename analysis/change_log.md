@@ -1,5 +1,303 @@
 ﻿# 代码变更日志
 
+## 2026-07-09 03:23 - 复核发送端 mDNS 发布实现
+
+### 修改目标
+
+按本轮要求复核发送端 mDNS 服务发布 / 移除实现，确认不实现搜索、不改 UI、不传输 payload。
+
+### 修改文件
+
+- `analysis/change_log.md`：追加本次复核记录。
+- `analysis/solve_logs.md`：记录本次构建验证结果。
+
+### 修改原因
+
+当前 `TransferLanDiscovery.ets` 已满足本轮目标：使用 `mdns.addLocalService()` / `mdns.removeLocalService()` 发布和移除 `_instantnote._tcp`，发现信息只包含摘要字段，不暴露完整确认码、token 或便签内容。
+
+### 验证方式
+
+已执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。输出包含项目既有签名配置警告。
+
+### 当前状态
+
+成功。本轮未产生业务代码变更；`searchPeers()` 仍返回空数组，没有搜索实现、没有 mock 设备、没有 UI 改动。
+
+### 后续建议
+
+下一轮可实现接收端 mDNS 搜索和 TXT 记录解析。
+
+## 2026-07-09 03:21 - 发送端 mDNS 服务发布
+
+### 修改目标
+
+将 `TransferLanDiscovery.ets` 中的发送端发布 / 停止发布从空实现改为真实 mDNS 本地服务发布和移除，不实现搜索、不接 UI、不传输 payload。
+
+### 修改文件
+
+- `entry/src/main/ets/common/TransferLanDiscovery.ets`：引入 `mdns`，实现 `startAdvertising(session)` 和 `stopAdvertising()`；发布 `_instantnote._tcp` 服务，TXT 记录只包含会话摘要字段。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证结果。
+
+### 修改原因
+
+局域网面对面投送需要先让发送端能发布可发现的会话摘要；本轮只暴露 `sessionId`、设备名、确认码后两位、过期时间和 payload 摘要，不暴露完整确认码、token 或便签内容。
+
+### 验证方式
+
+已执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。输出包含项目既有弃用 API 和签名配置警告。
+
+### 当前状态
+
+成功。发送端 mDNS 发布 / 移除代码已可编译；`searchPeers()` 仍返回空数组，没有搜索实现、没有 mock 设备、没有 UI 改动。
+
+### 后续建议
+
+下一轮可实现接收端 mDNS 搜索和 TXT 记录解析，但仍保持不传输 payload。
+
+## 2026-07-09 03:16 - 新增局域网发现层骨架
+
+### 修改目标
+
+进入真实局域网面对面投送代码阶段，先建立发现层类型与接口边界，并添加网络访问权限，不接入 UI、不传输 payload、不伪造发现结果。
+
+### 修改文件
+
+- `entry/src/main/module.json5`：新增 `ohos.permission.INTERNET` 权限声明。
+- `entry/src/main/ets/common/TransferLanDiscovery.ets`：新增发现层类型、状态、错误、选项接口，以及 `startAdvertising()`、`stopAdvertising()`、`searchPeers()`、`stopSearch()` 的安全空实现。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证结果。
+
+### 修改原因
+
+后续接入 mDNS / socket 前需要先有稳定可编译的发现层边界；当前实现只返回真实空结果，避免 UI 或用户误解已经发现真实设备。
+
+### 验证方式
+
+已执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。输出包含既有弃用 API 与签名配置警告，未发现本次新增文件导致的编译错误。
+
+### 当前状态
+
+成功。已新增发现层骨架，`searchPeers()` 当前返回空数组，没有 mock 设备，没有 UI 改动。
+
+### 后续建议
+
+下一轮可在 `TransferLanDiscovery.ets` 内接入 mDNS 的服务发布 / 停止发布最小实现，仍不传输 payload。
+
+## 2026-07-09 03:08 - 确认 socket / mDNS 官方文档页
+
+### 修改目标
+
+只阅读本机 DevEco / HarmonyOS SDK 中 `@ohos.net.socket` 和 `@ohos.net.mdns` 相关官方文档页，确认局域网投送可用 API 名称、权限和限制。
+
+### 修改文件
+
+- `analysis/transfer_lan_design.md`：新增“socket / mDNS 官方文档确认”小节，按已确认、未确认、下一步记录 socket、TCP、UDP、广播、组播和 mDNS 能力。
+- `analysis/change_log.md`：追加本次文档确认记录。
+
+### 修改原因
+
+后续接入真实局域网投送前，需要先基于本机官方文档确认 API 名称和权限边界，避免臆造 socket、UDP 或 mDNS 能力。
+
+### 验证方式
+
+未执行 build、Preview、真机或模拟器运行；本轮仅阅读本机 DevEco 官方文档页并更新文档，未进行真机跨设备验证。
+
+### 当前状态
+
+已确认 socket 文档中的 `import { socket } from '@kit.NetworkKit';`、TCP 客户端、TCP 监听、UDP bind/send/message、UDP 广播配置、MulticastSocket 组播接口和 `ohos.permission.INTERNET`；已确认 mDNS 文档中的 `import { mdns } from '@kit.NetworkKit';`、服务发布、移除、发现和解析接口。mDNS 权限名称、真机可用性和网络环境限制仍未确认。
+
+### 后续建议
+
+下一轮优先只查权限文档，确认 mDNS 是否需要显式权限声明，以及 socket / mDNS 在 phone、tablet、2in1 真机上的能力限制。
+
+## 2026-07-09 02:58 - 确认本地 SDK 网络能力索引
+
+### 修改目标
+
+只通过当前工程配置和本机 DevEco Studio / HarmonyOS SDK 文档索引，确认 ArkTS 后续接入局域网面对面投送可能用到的网络 API 方向。
+
+### 修改文件
+
+- `analysis/transfer_lan_design.md`：新增“本地 SDK 能力确认”小节，记录 TCP Socket、TCP 监听 / HTTP 服务、UDP、mDNS、Nearby / 分布式设备发现和权限候选的已确认、未确认、待确认状态。
+- `analysis/change_log.md`：追加本次本地 SDK 检索记录。
+
+### 修改原因
+
+后续真实局域网投送需要先确认 ArkTS / HarmonyOS SDK 可用能力，避免在未确认 API、权限和真机限制前写伪网络实现。
+
+### 验证方式
+
+未执行 build、Preview、真机或模拟器运行；本轮仅做本地 SDK / DevEco 文档索引检索和文档更新，未进行真机跨设备验证。
+
+### 当前状态
+
+已确认本地 DevEco 文档索引存在 `@ohos.net.socket`、`@ohos.net.mdns`、`@ohos.distributedDeviceManager` 和 `gameNearbyTransfer` 等条目；具体方法签名、权限、监听能力和适用限制仍需继续查官方文档页确认。
+
+### 后续建议
+
+下一轮优先打开 `@ohos.net.socket` 和 `@ohos.net.mdns` 官方文档页，确认 TCP 客户端、TCP 监听、UDP 绑定 / 广播、mDNS 服务发布 / 搜索的具体 API 名称和权限。
+
+## 2026-07-09 02:49 - 调研真实局域网接入路线
+
+### 修改目标
+
+根据当前 HarmonyOS / ArkTS 工程配置，补充真实局域网发现与传输方案的文档调研，不写网络代码、不修改 UI。
+
+### 修改文件
+
+- `analysis/transfer_lan_design.md`：新增“真实局域网接入调研”小节，拆分局域网发现层、设备连接层、文本 payload 传输层和图片传输后续阶段，并标注需要 DevEco Studio / HarmonyOS SDK 文档确认的能力。
+- `analysis/change_log.md`：追加本次文档调研记录。
+
+### 修改原因
+
+当前工程没有第三方网络依赖，模块配置中也未声明网络或局域网发现相关权限；后续接入真实投送前，需要先明确候选路线和 SDK 待确认事项，避免臆造 API 或夸大当前能力。
+
+### 验证方式
+
+未执行 build、Preview、真机或模拟器运行；本轮仅更新文档，未进行真机跨设备验证。
+
+### 当前状态
+
+文档已明确下一阶段路线，但真实局域网设备发现、真实设备连接、文本 payload 局域网传输和图片二进制跨设备传输仍未实现。
+
+### 后续建议
+
+下一轮优先只查 DevEco Studio / HarmonyOS SDK 文档，确认 ArkTS 可用的局域网发现、Socket / HTTP 监听能力和权限声明名称。
+
+## 2026-07-09 02:42 - 更新投送功能当前状态文档
+
+### 修改目标
+
+根据当前投送中心状态，更新局域网投送设计文档，避免把目标流程误读为已完成真实两机传输能力。
+
+### 修改文件
+
+- `analysis/transfer_lan_design.md`：新增“当前实现状态”小节，明确已完成能力、未完成能力和下一步 8 分钟以内小任务。
+- `analysis/change_log.md`：追加本次文档更新记录。
+
+### 修改原因
+
+投送中心已具备 UI、JSON 调试导入、投送包编码 / 解码 / 预览 / 合并和面对面投送会话 UI 雏形，但真实局域网发现、连接、文本 payload 传输和图片二进制跨设备传输仍未接入，需要在文档中明确边界。
+
+### 验证方式
+
+未执行 build、Preview、真机或模拟器运行；本轮仅文档更新。
+
+### 当前状态
+
+文档已明确当前面对面投送仍是会话流程预览，未声称已完成真机跨设备验证或真实两机传输。
+
+### 后续建议
+
+按文档中的 8 分钟以内小任务继续拆分推进，优先保持 UI 文案和真实网络能力边界一致。
+
+## 2026-07-09 02:39 - 明确图片跨设备传输待接入
+### 修改目标
+在投送中心明确第一阶段适合文本便签投送验证，图片跨设备传输仍待接入，避免用户误解。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：发送页摘要在包含图片块时显示“当前版本图片跨设备传输待接入，文本内容可先验证。”；接收导入预览在包含图片块时使用同样方向的友好说明。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+当前投送协议和 UI 可用于文本内容验证，但图片二进制跨设备传输尚未实现，需要在发送和接收预览两端明确提示。
+### 验证方式
+已执行局部文本检查，确认提示文案已出现在发送摘要和导入预览路径；未修改 `MemoTransfer.ets` 协议结构，未新增网络或图片二进制传输代码；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+文本投送验证路径保留；图片块不会被过滤，但用户会看到图片跨设备传输待接入的说明。
+### 后续建议
+由用户在 DevEco Studio 中用包含图片块的便签验证发送摘要和导入预览提示是否清晰。
+
+## 2026-07-09 02:37 - 发送页接入 TransferLanSession 本地会话
+### 修改目标
+让发送页本地会话卡片的确认码和摘要生成逻辑复用 `TransferLanSession.ets`，不再在页面内重复生成会话摘要。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：导入 `TransferLanSession`、`createLocalTransferSession()`、`formatTransferCode()`、`formatRemainingSeconds()`；新增 `transferSession` 状态；点击“开启面对面投送”时创建本地会话；会话卡片展示 `transferCode` 和 `payloadSummary.memoCount/textBlockCount/imageBlockCount/charCount`；保留原 JSON 调试入口和接收页逻辑。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+会话数据结构和摘要统计已独立到 `TransferLanSession.ets`，发送页应复用该逻辑，减少页面内临时统计和确认码生成逻辑，为后续单独接入真实传输层留出清晰边界。
+### 验证方式
+已执行局部文本检查，确认 `Index.ets` 已调用 `createLocalTransferSession()`，确认码和会话摘要来自 `transferSession`；未发现页面内 `generateTransferCode` 或 `Math.random` 生成确认码；JSON 调试入口仍保留；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+发送页本地会话卡片已从 `TransferLanSession` 会话对象读取确认码、剩余时间和摘要；未接入网络，未修改接收页、`MemoTransfer.ets` 或 `EditMemo.ets`。
+### 后续建议
+由用户在 DevEco Studio 中验证发送页开启会话后确认码和摘要展示是否符合预期。
+
+## 2026-07-09 02:32 - 新增局域网投送会话纯逻辑模块
+### 修改目标
+新增 `TransferLanSession.ets`，只提供面对面投送会话的数据结构和本地工具函数，不接入页面和网络。
+### 修改文件
+- `entry/src/main/ets/common/TransferLanSession.ets`：新增 `TransferPayloadSummary`、`TransferLanSession` 接口；实现 `createTransferPayloadSummary()`、`createLocalTransferSession()`、`isTransferSessionExpired()`、`formatTransferCode()`、`formatRemainingSeconds()` 等纯逻辑函数。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+后续页面接入会话 UI 前，需要先有独立、可复用的会话数据结构和摘要/过期/格式化工具，同时避免在本轮引入真实网络能力或页面改动。
+### 验证方式
+已执行局部文本检查，确认新文件未使用 `any`、`unknown`、对象 spread，未出现 Socket、Nearby、mDNS、UDP、fetch 等网络接入关键词；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+新模块为纯 ArkTS 逻辑模块，当前未被 `Index.ets` 或其他页面接入。
+### 后续建议
+后续可在单独任务中让 `Index.ets` 发送页复用 `createLocalTransferSession()`，替代页面内临时会话状态。
+
+## 2026-07-09 02:30 - 接收页增加本地搜索设备状态
+### 修改目标
+将接收页从直接粘贴 JSON 的体验改为“搜索附近设备 + 高级导入”的结构，但只做本地 UI 状态，不实现真实局域网搜索。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：新增 `isSearchingPeers`、`hasSearchedPeers` 状态；接收页“搜索附近设备”点击后短暂显示“正在搜索同一 Wi-Fi 下的 InstantNote 设备”和“真实局域网发现待接入”，随后进入“暂未发现附近设备 / 请确认两台设备连接同一 Wi-Fi / 真实发现能力待接入”空态；移除旧的伪设备占位列表方法；保留高级 JSON 粘贴导入入口。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+接收页主流程应体现搜索附近设备的产品方向，但当前真实发现能力尚未接入，因此只能展示本地搜索中和未发现状态，不能伪造已发现设备。
+### 验证方式
+已执行局部文本检查，确认保留“高级：调试 JSON 导入”和“粘贴完整投送内容”，未保留伪设备字符串，未出现 Socket、Nearby、mDNS、UDP 等网络接入关键词；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+接收页默认显示“搜索附近设备”；点击后本地模拟搜索结束并显示未发现空态。真实局域网发现仍待接入。
+### 后续建议
+由用户在 DevEco Studio 中验证接收页搜索中、未发现空态和高级导入展开效果。
+
+## 2026-07-09 02:27 - 发送页增加本地面对面投送会话卡片
+### 修改目标
+在投送中心发送页增加本地“面对面投送会话卡片”，让发送流程更像产品会话，但不实现真实网络连接或传输。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：新增 `isSendSessionOpen`、`transferCode`、`sessionExpireText` 状态；点击“开启面对面投送”后本地生成 6 位确认码并展示设备名、确认码、等待状态和“真实局域网发现与传输待接入”提示；新增“取消投送”按钮恢复未开启状态；保留原 JSON 调试入口。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+发送页需要有更接近真实产品的会话流程反馈，但当前网络层未接入，必须明确这是本地 UI 状态，不能让用户误解已经可以真实连接附近设备或传输便签。
+### 验证方式
+已执行局部文本检查，确认新增本地会话状态和“开启面对面投送 / 取消投送”入口，未出现 Socket、Nearby、mDNS、UDP 等网络接入；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+发送页可开启本地会话预览并生成 6 位确认码；取消后回到未开启状态。真实局域网发现与传输仍待接入，JSON 调试能力未删除。
+### 后续建议
+由用户在 DevEco Studio 中验证发送页会话卡片的开启、取消和小屏展示效果。
+
+## 2026-07-09 02:22 - 投送中心调试 JSON 区域统一折叠
+### 修改目标
+将投送中心里的 JSON 复制 / 粘贴能力收进高级区域，默认不抢占面对面投送主流程视觉。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：新增 `showTransferDebugArea` 状态，替代发送/接收页各自的调试折叠状态；发送页和接收页底部统一显示“高级：调试 JSON 导入”按钮；展开后保留原 JSON 生成、粘贴、预览导入能力。
+- `analysis/change_log.md`：追加本次任务记录。
+### 修改原因
+主流程应优先展示面对面投送状态，JSON 复制 / 粘贴只作为备用验证入口，默认隐藏可以降低对普通流程的干扰。
+### 验证方式
+已执行局部文本检查，确认 `showDebugImport`、`showDebugPayload` 已移除引用，`showTransferDebugArea` 控制发送和接收两处调试区域；未执行 build、Preview、真机或模拟器运行。
+### 当前状态
+默认打开投送中心时高级调试区域关闭；展开后仍可使用原 JSON 验证能力。
+### 后续建议
+由用户在 DevEco Studio 中验证投送中心发送/接收页的高级区域展开与收起效果。
+
+## 2026-07-09 02:18 - 投送中心面对面流程 UI 改造
+### 修改目标
+将投送中心从调试 JSON 复制/粘贴为主，改为“面对面投送”主流程预览 UI，同时明确真实局域网发现与传输尚未接入。
+### 修改文件
+- `entry/src/main/ets/pages/Index.ets`：新增发送端会话状态、接收端搜索状态、高级调试入口折叠状态；发送页改为选择范围、创建会话、等待接收、完成/失败四步展示；接收页改为未搜索、搜索中、未发现、发现列表预览四态展示；保留 JSON 粘贴导入并移动到“高级 / 调试导入”；导入仍先 `previewTransferImport`，确认后才 `mergeReceivedMemos`。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：追加本次构建验证记录。
+### 修改原因
+原投送中心直接暴露大段 JSON，交互更像调试工具，不利于展示真实产品流程。本次改为面对面投送会话 UI，但明确标注“局域网发现与传输待接入 / 当前为会话流程预览”，避免用户误解已经支持真实两机传输。
+### 验证方式
+已执行文本检查，确认未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`。第一次执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp` 超时；第二次延长超时后构建成功，输出仅包含既有 deprecated API、Preferences 异常处理提示、混淆提示和未配置签名警告。
+### 当前状态
+已完成投送中心主流程 UI 改造；真实局域网发现、连接和传输仍未接入；高级调试导入仍可通过粘贴 JSON 完成备用验证。
+### 后续建议
+在 DevEco Studio Preview 或真机中手动检查手机、小屏、平板、2in1 弹窗布局，重点确认发送四步状态、接收四态切换和高级导入折叠区域的可读性。
+
 > 说明：本文件用于记录涉及代码文件的修改。
 > 本次为初始化任务，仅新增文档与目录，无业务代码改动。
 
@@ -844,3 +1142,339 @@ AppStorage 是编辑页返回首页时的即时同步数据源；Preferences 只
 编辑保存后只要 `updatedAt` 更新，首页 ForEach key 会变化，卡片会重新渲染；置顶/取消置顶相关 key 字段仍保留。
 ### 后续建议
 在真机或预览中验证：修改正文、标题、标签后返回首页，普通列表和搜索结果中的卡片应立即显示最新内容。
+
+## 2026-07-09 14:37 - 接收端 mDNS 搜索附近服务
+
+### 修改目标
+
+将 `searchPeers(timeoutMs)` / `stopSearch()` 从空实现改为真实 mDNS 搜索 InstantNote 服务；本轮只发现和解析服务摘要，不传输 payload，不接入 UI。
+
+### 修改文件
+
+- `entry/src/main/ets/common/TransferLanDiscovery.ets`：新增 mDNS DiscoveryService 搜索状态；`searchPeers()` 使用 `_instantnote._tcp` 启动发现、解析服务 TXT 摘要并转为 `TransferDiscoveredPeer`；过滤过期 session；协议版本不一致时保留结果但标记 `isCompatible = false`；超时或手动停止时返回当前发现列表。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证超时情况。
+
+### 修改原因
+
+接收端需要开始使用真实 mDNS 发现流程查找同一局域网内发送端发布的 InstantNote 会话，但发现阶段不能请求或传输完整便签 JSON，也不能伪造设备结果。
+
+### 验证方式
+
+已执行局部文本检查，确认 `TransferLanDiscovery.ets` 未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`。按要求最多执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，命令在 124 秒后超时，未获得构建成功或失败结果，未重复执行。未执行 Preview、真机或模拟器运行。
+
+### 当前状态
+
+部分成功。代码已实现真实 mDNS 搜索流程和停止搜索流程；构建未验证，由用户在 DevEco Studio 中验证。
+
+### 后续建议
+
+在 DevEco Studio 中执行一次构建；若出现编译错误，优先只修复 `TransferLanDiscovery.ets` 中本轮引入的 mDNS 类型或回调签名问题。
+
+## 2026-07-09 14:42 - 投送中心接入 mDNS 发现层
+
+### 修改目标
+
+将投送中心 UI 接入 `TransferLanDiscovery`：发送端开启会话时尝试发布 mDNS 服务，取消投送时停止发布；接收端搜索按钮调用真实 `searchPeers()`，展示真实发现结果或空态。本轮不实现 payload 传输。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：导入 `startAdvertising()`、`stopAdvertising()`、`searchPeers()`、`stopSearch()` 和 `TransferDiscoveredPeer`；发送端开启 / 取消按钮接入发布和停止发布；接收端搜索按钮接入真实搜索；新增真实发现结果列表，展示设备名、确认码后两位、摘要、剩余时间和协议兼容状态；搜索失败时展示友好错误。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建失败原因。
+
+### 修改原因
+
+发送端和接收端 UI 需要从本地预览态推进到真实 mDNS 发现流程，但发现阶段只能使用服务摘要，不能请求或导入便签 payload。
+
+### 验证方式
+
+已执行局部文本检查，确认本轮 `Index.ets` 未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`，旧的假搜索方法引用已移除。已按要求最多执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建失败；错误位于 `entry/src/main/ets/common/TransferLanDiscovery.ets` 的 `LocalServiceInfo.txtRecord` 类型和由此引发的 `any/unknown` 检查，不在本轮允许修改范围内，未越界修复。未执行 Preview、真机或模拟器运行。
+
+### 当前状态
+
+部分成功。投送中心 UI 已接入 discovery 调用；构建未通过，阻塞在发现层文件的 mDNS TXT 记录类型适配。
+
+### 后续建议
+
+下一轮优先只修复 `TransferLanDiscovery.ets` 中当前 SDK 的 mDNS TXT 记录字段类型，再重新构建验证 UI 接入链路。
+
+## 2026-07-09 15:11 - 接收页增加发现设备演示模式
+
+### 修改目标
+
+为只有单个 DevEco 模拟器的课堂展示场景，在投送中心接收页未发现空态下增加“演示：模拟发现设备”入口，用于展示发现设备后的 UI 状态，并明确标注为演示数据。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增 `isDemoDiscoveryMode` 状态；未发现附近设备时显示“演示：模拟发现设备”次要按钮；点击后只注入一条 `TransferDiscoveredPeer` 演示数据；发现列表标题、说明和设备卡片均明确显示演示数据不是真实局域网发现。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建失败原因。
+
+### 修改原因
+
+课堂展示可能只有单个模拟器，无法完成真实 mDNS 多设备发现；需要一个明确标注的演示入口展示发现设备后的 UI，同时不能伪造成真实搜索结果或真实传输成功。
+
+### 验证方式
+
+已执行局部文本检查，确认本轮 `Index.ets` 未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`；演示入口未调用 `searchPeers()`、未传输 payload、未调用导入或合并逻辑。已按要求执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建失败；错误仍位于 `entry/src/main/ets/common/TransferLanDiscovery.ets` 的 `LocalServiceInfo.txtRecord` 类型适配问题，不在本轮修改范围内。未执行 Preview、真机或模拟器运行。
+
+### 当前状态
+
+部分成功。接收页演示模式 UI 已完成，真实搜索路径保留；构建未通过，阻塞在发现层既有类型错误。
+
+### 后续建议
+
+下一轮优先修复 `TransferLanDiscovery.ets` 的 mDNS TXT 记录类型适配，再验证真实搜索和演示模式在投送中心的展示。
+
+## 2026-07-09 15:30 - 修复 mDNS 发现层 ArkTS 编译错误
+
+### 修改目标
+
+只修复 `TransferLanDiscovery.ets` 当前构建错误，移除 ArkTS 不允许的 `any` / `unknown` 问题来源和当前 SDK 不支持的 `LocalServiceInfo.txtRecord` 字段，不扩展功能。
+
+### 修改文件
+
+- `entry/src/main/ets/common/TransferLanDiscovery.ets`：删除 `txtRecord` 发布和解析逻辑；`LocalServiceInfo` 只保留 `serviceName`、`serviceType`、`port`；搜索结果只从 `serviceName` / `serviceType` 生成最小 `TransferDiscoveredPeer`，摘要字段暂填 0。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证成功。
+
+### 修改原因
+
+当前 HarmonyOS SDK 的 `mdns.LocalServiceInfo` 类型不包含 `txtRecord` 字段，继续写入和读取该字段会导致编译失败；同时 ArkTS 会把相关访问触发为 `any/unknown` 违规。
+
+### 验证方式
+
+已搜索确认 `entry/src/main/ets/common/TransferLanDiscovery.ets` 中不再存在 `any`、`unknown`、`txtRecord`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。mDNS 发现层恢复为最小可编译实现；发现结果不再解析 TXT 摘要，`memoCount`、`textBlockCount`、`imageBlockCount`、`charCount` 暂为 0。
+
+### 后续建议
+
+后续如需恢复摘要字段，必须先确认当前 SDK 支持的 mDNS 服务附加信息字段或改用其他发现/传输层设计。
+
+## 2026-07-09 16:10 - 接收页补齐演示连接 UI
+
+### 修改目标
+
+补齐投送中心接收页“选择设备 → 核对确认码 → 演示连接结果”的课堂展示 UI 流程，只做演示状态，不进行真实局域网连接、payload 传输或便签导入。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增演示设备选择、确认码输入和演示连接状态；演示设备卡片点击后显示核对确认码区域；点击“演示连接”后显示“演示连接成功 / 未进行真实局域网连接 / 未传输便签内容”。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证成功。
+
+### 修改原因
+
+单模拟器课堂展示需要完整展示发现设备后的接收端交互状态，但不能伪装成真实连接成功，也不能触发导入或传输逻辑。
+
+### 验证方式
+
+已执行局部文本检查，确认本轮未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`；演示连接方法只更新页面状态，未调用真实 mDNS、socket、`decodeTransferPackage()` 或 `mergeReceivedMemos()`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。演示设备卡片可进入确认码核对 UI，并能展示明确的演示连接结果；高级 JSON 调试导入入口保留。
+
+### 后续建议
+
+在 DevEco Studio 模拟器中手动检查接收页：未发现空态点击演示按钮、点击演示设备卡片、输入确认码、点击演示连接后的文案和布局。
+
+## 2026-07-09 16:25 - 修复投送倒计时和演示确认码校验
+
+### 修改目标
+
+修复投送中心发送页 / 接收页剩余时间不实时刷新，以及接收页演示模式任意确认码都能通过的问题。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增 `transferClockNow` 和 timer 管理方法，每秒刷新投送相关剩余时间；关闭投送中心、页面退出、取消投送和会话过期时清理或更新状态；演示模式保存完整 6 位确认码，仅展示后两位；“演示连接”改为确认码校验，只有完整匹配才显示“演示校验通过”。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证成功。
+
+### 修改原因
+
+倒计时原先只依赖页面重新渲染，导致剩余时间不会自动变化；演示连接原先不校验确认码，容易误导用户以为任意输入都能完成连接。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation` 或对象 spread。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。发送页会话剩余时间和接收页设备剩余时间可随 `transferClockNow` 每秒刷新；演示确认码为空、不足 / 超过 6 位、6 位但不匹配时都会提示，只有输入完整正确确认码才显示“演示校验通过 / 未建立真实局域网连接 / 未传输便签内容”。
+
+### 后续建议
+
+在模拟器中手动验证：发送端开启投送后观察倒计时连续变化；接收页演示设备输入空值、短码、错误 6 位和正确 6 位确认码。
+
+## 2026-07-09 19:04 - 投送倒计时独立组件修复
+
+### 修改目标
+
+修复发送页倒计时不稳定刷新的问题，将发送端和接收端倒计时统一改为独立组件自身状态驱动。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增 `TransferCountdownText` 组件，组件内部持有 `@State now` 并用 `setInterval` 每秒刷新；发送页新增 `buildSessionCountdownItem()` 并用 `TransferCountdownText` 显示剩余时间；接收页 demoLocal 设备卡片也改用同一组件显示剩余时间；删除发送页 `sendRemainingText` 缓存字符串和 `updateTransferRemainingTexts()` 更新链路。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建失败和修复情况。
+
+### 修改原因
+
+发送页通过缓存字符串驱动倒计时在运行时刷新不稳定；独立组件直接依赖自身 `@State now`，可以让 Text 每秒由组件自身状态触发刷新。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`，也没有 `sendRemainingText`、`updateTransferRemainingTexts` 残留。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，首次构建发现本轮引入的 `transferSession` 可能为空编译错误，已改为通过 `sessionExpiresAt()` 安全读取；按本轮一次构建限制未再次构建。
+
+### 当前状态
+
+部分验证。代码已修复构建指出的本轮类型错误，但修复后未再次执行构建；需在 DevEco Studio 或下一轮构建中确认。
+
+### 后续建议
+
+在模拟器中手动验证发送页和接收页倒计时均每秒变化，且发送页不再依赖缓存字符串。
+
+## 2026-07-09 18:51 - 修复真实搜索反馈与发送倒计时
+
+### 修改目标
+
+修复接收页真实 mDNS 搜索运行反馈不明显、无结果提示不清晰，以及发送页剩余时间不稳定刷新的问题。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：接收页真实搜索改为 idle/empty、searching、found 三态反馈；搜索中显示“正在搜索真实设备”、mDNS 搜索说明和“取消搜索”按钮；新增 `cancelRealSearch()`；搜索无结果时显示模拟器 mDNS 可能不支持的说明；新增 `sendRemainingText`，发送页“剩余时间”直接绑定该状态；timer 启动和每秒 tick 调用 `updateTransferRemainingTexts()`。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建结果。
+
+### 修改原因
+
+真实搜索需要在运行中和结束后给出明确状态，避免用户误以为按钮消失就是卡住；发送页倒计时需要直接由 `@State` 字符串驱动，避免只在切换页面后刷新。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。搜索中会显示明确反馈和取消入口；无真实设备时显示模拟器 mDNS 说明；单机演示入口保持可见；发送页剩余时间直接绑定 `sendRemainingText`。
+
+### 后续建议
+
+在模拟器中手动验证：点击“搜索真实设备”观察搜索中反馈和取消搜索；开启发送会话后停留在发送页观察剩余时间每秒变化。
+
+## 2026-07-09 18:42 - 拆分真实搜索与单机演示入口
+
+### 修改目标
+
+收敛投送中心接收页，将真实 mDNS 搜索和单机演示当前发送会话拆成两个明确入口，并用 `transferClockTick` 强制驱动倒计时刷新。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：接收页固定显示“搜索真实设备”和“单机演示当前发送会话”；真实 mDNS 卡片只显示“已发现服务”“摘要待连接后获取”“连接层与确认码校验待接入”，不显示确认码输入、核对按钮或“可连接”；单机演示必须绑定未过期 `transferSession`，否则提示先开启发送会话；新增 `transferClockTick` 和 `currentTransferNow()`，发送页和接收页剩余时间都通过该方法读取当前时间。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建结果。
+
+### 修改原因
+
+真实 mDNS 发现当前没有完整验证码、payload 和摘要，不能被当作可连接或可校验设备；单模拟器课堂演示需要独立入口复用当前发送会话；倒计时需要额外 tick 状态确保 ArkUI 追踪每秒刷新。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。真实搜索和单机演示入口已拆分；真实 mDNS 结果不显示验证码输入或“可连接”；单机演示只绑定当前发送会话；发送页和接收页倒计时通过 `currentTransferNow()` 与 `transferClockTick` 刷新。
+
+### 后续建议
+
+在单模拟器中手动验证：开启发送会话后切到接收页点击“单机演示当前发送会话”，确认后两位、摘要和倒计时与发送页一致；真实搜索结果只显示待接入状态。
+
+## 2026-07-09 18:31 - 收敛真实发现与本机演示校验
+
+### 修改目标
+
+区分接收页真实 mDNS 发现结果和本机演示结果，避免真实发现结果进入验证码校验；同时让发送页剩余时间显示显式依赖 `transferClockNow`。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增接收设备来源状态；真实 mDNS 结果显示“真实发现服务”“摘要待连接后获取”“连接层与确认码校验待接入”，不显示验证码输入和校验按钮；本机演示设备仅在已有未过期 `transferSession` 时生成，并复用发送会话的确认码、摘要和过期时间；打开投送中心时保留未过期发送会话并启动时钟；发送页和接收页剩余时间方法显式接收 `transferClockNow`。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建结果。
+
+### 修改原因
+
+真实 mDNS 发现目前没有完整验证码和 payload，不能与本机演示校验混用；发送页倒计时需要让 UI 表达式直接依赖 `@State transferClockNow`，避免只在切页时刷新。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。真实 mDNS 发现路径只展示服务状态和待接入提示，不进入验证码输入或演示校验；本机演示设备必须先开启发送会话，且确认码、摘要、倒计时来自同一个 `transferSession`。
+
+### 后续建议
+
+在模拟器中手动验证：真实搜索发现设备时不出现输入框；先开启发送会话再点击演示发现，确认后两位、摘要和倒计时与发送页一致，并用完整 6 位码验证演示校验。
+
+## 2026-07-09 18:19 - 修复投送中心接收校验入口与倒计时刷新
+
+### 修改目标
+
+修复接收页发现设备后验证码输入区域不明显、真实 mDNS 无摘要时显示 0/0/0/0、发送页倒计时刷新触发不充分的问题。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：设备卡片增加“选择并核对确认码”按钮；单个演示/本机绑定设备自动选中并展示核对区域；演示按钮文案改为“演示校验”；真实 mDNS 无摘要时显示“摘要待连接后获取”；模式切换到已有会话或设备列表时确保倒计时 timer 启动。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建结果。
+
+### 修改原因
+
+接收页需要让用户明确知道在哪里输入 6 位确认码；真实发现结果当前无法携带摘要时不能用 0 值误导用户；发送页倒计时需要在进入投送中心模式后继续依赖 `transferClockNow` 实时刷新。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。接收页设备卡片具备明确核对入口，单个演示设备会直接展示确认码输入区；绑定发送会话的演示设备继续复用发送端确认码、摘要和过期时间；真实 mDNS 无摘要设备显示“摘要待连接后获取”；发送/接收剩余时间继续通过 `transferClockNow` 刷新。
+
+### 后续建议
+
+在模拟器中手动验证：开启发送投送后观察发送页倒计时连续变化；切到接收页演示发现，确认摘要与发送页一致、后两位一致，并分别输入正确和错误 6 位确认码。
+
+## 2026-07-09 17:56 - 修复演示确认码与发送端会话不一致
+
+### 修改目标
+
+修复接收页“演示发现设备”使用独立固定确认码，导致与发送页已创建会话确认码不一致的问题。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：演示发现设备优先绑定当前未过期的 `transferSession`；绑定时复用发送端 `transferCode`、`payloadSummary`、`expiresAt` 和 `deviceName`；无发送端会话时才使用独立演示数据，并明确显示“独立演示数据，未绑定发送端会话”；发送端取消或过期时清理已绑定演示设备。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证成功。
+
+### 修改原因
+
+单模拟器演示流程需要发送页显示的完整确认码、接收页设备卡片后两位和接收页校验使用的完整确认码一致，否则用户会看到后两位和可通过验证码不匹配。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation` 或对象 spread。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。发送页已开启投送时，接收页演示设备会复用同一个确认码和摘要；无发送端会话时显示独立演示提示。演示数据仍明确标注为非真实局域网发现。
+
+### 后续建议
+
+在模拟器中手动验证：先开启发送会话，再切到接收页点击演示发现，确认设备卡片后两位与发送页确认码一致，并分别输入正确和错误 6 位确认码。

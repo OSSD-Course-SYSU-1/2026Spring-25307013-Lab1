@@ -1,9 +1,94 @@
 ﻿# 问题解决日志
 
+## 2026-07-09 03:23 - 发送端 mDNS 发布复核构建验证
+
+### 现象
+
+用户重复要求确认发送端 mDNS 服务发布 / 移除实现，需要复核当前实现并验证构建。
+
+### 原因分析
+
+当前 `TransferLanDiscovery.ets` 已使用 `@kit.NetworkKit` 的 `mdns.addLocalService()` / `mdns.removeLocalService()`，本轮风险主要是确认实现仍满足不搜索、不接 UI、不传输 payload 的边界。
+
+### 处理过程
+
+执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 557 ms`。输出包含未配置 signingConfigs 的既有签名警告；本轮没有新增业务代码变更。
+
+### 后续建议
+
+下一步再实现接收端 mDNS 搜索时，继续限制为发现摘要解析，不传输 payload。
+
+## 2026-07-09 03:21 - 发送端 mDNS 发布构建验证
+
+### 现象
+
+`TransferLanDiscovery.ets` 接入 `mdns.addLocalService()` / `mdns.removeLocalService()` 后，需要确认 ArkTS 类型和构建是否通过。
+
+### 原因分析
+
+本轮新增了 `@kit.NetworkKit` 的 mDNS 调用、`mdns.LocalServiceInfo`、TXT 记录和全局发布状态，主要风险是 API 类型、TXT 记录类型或上下文获取方式不匹配。
+
+### 处理过程
+
+执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 8 s 855 ms`。输出仍包含项目既有弃用 API 警告和未配置 signingConfigs 的签名警告，未发现本轮 mDNS 发布实现导致的编译错误。
+
+### 后续建议
+
+接收端搜索实现前，先保持 `searchPeers()` 返回空数组；下一步只接入 mDNS 搜索和 TXT 记录解析，不传输 payload。
+
+## 2026-07-09 03:16 - 局域网发现层骨架构建验证
+
+### 现象
+
+新增 `TransferLanDiscovery.ets` 和 `ohos.permission.INTERNET` 后，需要确认工程是否仍可编译。
+
+### 原因分析
+
+本轮新增了 ArkTS 导出类型 / 函数和 `module.json5` 权限声明，主要风险是类型引用、未使用符号、JSON5 结构或 ArkTS 语法导致构建失败。
+
+### 处理过程
+
+执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 9 s 485 ms`。命令输出包含既有弃用 API 警告和未配置 signingConfigs 的签名警告，未发现本次新增发现层骨架导致的编译错误。
+
+### 后续建议
+
+后续接入 mDNS 实现时继续保持小步构建验证，并区分新引入错误与项目既有警告。
+
 ## 记录规范
 
 - 记录时间、现象、原因分析、处理过程、结果与后续建议。
 - 若问题未解决，必须说明阻塞点与下一步计划。
+
+## 2026-07-09 02:18 - 投送中心面对面流程 UI 构建验证
+### 现象
+本轮需要将投送中心改为面对面投送流程 UI，同时不能让用户误解已经支持真实局域网搜索和两机传输。
+### 原因分析
+旧 UI 以调试 JSON 复制/粘贴为主，主流程不像真实产品；但当前工程只具备投送包编码、解码、导入预览与合并能力，真实 LAN 发现和传输层尚未实现。
+### 处理过程
+1. 在 `Index.ets` 内新增发送端会话状态、接收端搜索状态和高级调试入口折叠状态。
+2. 发送页保留“选中便签 / 全部便签”，增加创建会话预览、确认码、倒计时、投送摘要、等待接收、完成/失败状态。
+3. 接收页增加未搜索、搜索中、未发现和发现列表预览四态；发现列表明确标注“演示占位，真实发现待接入”。
+4. 将粘贴 JSON 导入移动到“高级 / 调试导入”，并保留先预览再确认合并的导入链路。
+5. 执行文本检查，确认未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`。
+6. 第一次执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp` 在 124 秒超时；第二次延长超时后重新执行。
+### 结果
+第二次 `assembleApp` 构建成功；输出仅包含既有 deprecated API、Preferences 异常处理提示、混淆提示和未配置签名警告。
+### 验证
+已执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+### 后续建议
+在 DevEco Studio 中手动验证投送中心弹窗布局，重点检查小屏下四步状态、接收搜索态和高级导入区是否可读。
 
 ## 当前记录
 
@@ -986,3 +1071,374 @@ Preferences 已持久化成功，但 Index 页面返回时仍使用旧 `this.mem
 已执行文本检查，确认未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`。已按要求执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含既有 deprecated API、Preferences 异常处理提示、AppStorage deprecated 提示和未配置签名警告。
 ### 后续建议
 手动回归编辑正文、标题、标签后返回首页，以及搜索结果中的卡片预览刷新；同时确认置顶/取消置顶 UI 仍随状态正确变化。
+
+## 2026-07-09 14:37 - 接收端 mDNS 搜索构建验证超时
+
+### 现象
+
+本轮将 `searchPeers(timeoutMs)` / `stopSearch()` 接入真实 mDNS 搜索后，需要确认 `mdns.DiscoveryService`、发现事件、解析服务和 TXT 记录解析代码是否可编译。
+
+### 原因分析
+
+主要风险来自 HarmonyOS mDNS 发现服务的 ArkTS 类型签名、`serviceFound` / `serviceLost` 回调参数、`resolveLocalService()` 返回类型，以及计时停止搜索流程。
+
+### 处理过程
+
+1. 实现 `searchPeers()`：创建 `_instantnote._tcp` DiscoveryService，监听发现事件，解析服务摘要，不请求 payload。
+2. 实现 `stopSearch()`：停止当前搜索并让等待中的 `searchPeers()` 返回当前发现列表。
+3. 执行局部文本检查，确认未引入 `any`、`unknown`、对象 spread 或 `stopPropagation`。
+4. 按本轮要求最多执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+`assembleApp` 命令在 124 秒后超时，没有获得构建成功或失败结果；本轮未重复执行构建。代码层面未接入 UI、未修改导入逻辑、未传输便签 JSON、未伪造设备。
+
+### 验证
+
+未完成构建验证；未执行 DevEco Studio Preview、真机或模拟器运行。未验证，由用户在 DevEco Studio 中验证。
+
+### 后续建议
+
+用户在 DevEco Studio 中重新构建；如果报错，优先检查 `mdns.DiscoveryService` 事件回调和 `LocalServiceInfo.txtRecord` 类型是否与当前 SDK 定义一致。
+
+## 2026-07-09 14:42 - 投送中心接入发现层构建失败
+
+### 现象
+
+本轮将投送中心发送按钮接入 `startAdvertising()` / `stopAdvertising()`，接收搜索按钮接入 `searchPeers()` 后，执行一次 `assembleApp` 构建验证失败。
+
+### 原因分析
+
+构建错误集中在 `entry/src/main/ets/common/TransferLanDiscovery.ets`：当前 SDK 的 `mdns.LocalServiceInfo` 类型不包含 `txtRecord` 字段，导致创建本地服务和解析发现服务时类型不匹配，并触发 ArkTS `any/unknown` 相关报错。该文件不在本轮允许修改范围内。
+
+### 处理过程
+
+1. 在 `Index.ets` 导入发现层接口。
+2. 发送端开启会话时创建 `TransferLanSession` 并调用 `startAdvertising(session)`。
+3. 发送端取消投送和关闭面板时调用停止发布 / 停止搜索。
+4. 接收端搜索按钮调用 `searchPeers(3000)`，将真实返回结果保存到 `discoveredPeers`。
+5. UI 展示真实发现结果或空态，搜索异常时展示友好错误。
+6. 执行本轮唯一一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建失败，输出包含 `LocalServiceInfo` 不存在 `txtRecord` 字段等错误。因本轮修改范围限定为 `Index.ets` 和日志文件，未修改 `TransferLanDiscovery.ets`。本轮未接入 payload 传输，未调用发现结果导入，未展示假设备。
+
+### 验证
+
+未完成构建验证；未执行 DevEco Studio Preview、真机或模拟器运行。未验证，由用户在 DevEco Studio 中验证。
+
+### 后续建议
+
+下一轮单独修复 `TransferLanDiscovery.ets` 的 mDNS TXT 记录字段适配，并重新执行构建。
+
+## 2026-07-09 15:11 - 接收页演示模式构建失败
+
+### 现象
+
+本轮在接收页未发现空态下新增“演示：模拟发现设备”入口后，执行一次 `assembleApp` 构建验证失败。
+
+### 原因分析
+
+构建失败仍集中在 `entry/src/main/ets/common/TransferLanDiscovery.ets`：当前 SDK 的 `mdns.LocalServiceInfo` 类型不包含 `txtRecord` 字段，导致发现层编译失败，并触发 `any/unknown` 相关报错。该问题不是本轮 `Index.ets` 演示模式新增逻辑引入的错误。
+
+### 处理过程
+
+1. 在 `Index.ets` 新增 `isDemoDiscoveryMode` 状态。
+2. 在接收页未发现附近设备空态下新增“演示：模拟发现设备”按钮。
+3. 点击演示按钮后注入一条演示 `TransferDiscoveredPeer` 数据，只包含设备名、确认码后两位、摘要字段、协议版本和兼容状态。
+4. 在发现列表标题、说明和设备卡片中明确标注“演示数据，非真实局域网发现”。
+5. 执行本轮唯一一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建失败，输出包含 `LocalServiceInfo` 不存在 `txtRecord` 字段等错误。本轮未修改 `MemoTransfer.ets`，未删除真实搜索逻辑，演示入口不调用 mDNS、不传输 payload、不导入便签、不调用 `mergeReceivedMemos()`。
+
+### 验证
+
+未完成构建验证；未执行 DevEco Studio Preview、真机或模拟器运行。未验证，由用户在 DevEco Studio 中验证。
+
+### 后续建议
+
+先修复 `TransferLanDiscovery.ets` 与当前 SDK 的 mDNS TXT 记录类型不匹配问题，再重新构建并手动检查演示模式按钮和卡片标注。
+
+## 2026-07-09 15:30 - TransferLanDiscovery 编译错误修复验证
+
+### 现象
+
+构建报错集中在 `TransferLanDiscovery.ets`：ArkTS 禁止 `any/unknown`，且当前 SDK 的 `mdns.LocalServiceInfo` 不支持 `txtRecord` 字段。
+
+### 原因分析
+
+发现层上一版尝试通过 mDNS TXT 记录发布和解析会话摘要，但当前 SDK 类型定义中没有 `txtRecord`，因此对象字面量和属性访问都会编译失败，并引发 ArkTS 类型规则错误。
+
+### 处理过程
+
+1. 删除 `LocalServiceInfo` 对象中的 `txtRecord` 字段。
+2. 删除 `createTxtRecord()`、TXT 字段读取和所有 `serviceInfo.txtRecord` 访问。
+3. 不猜测 `txtRecord` 替代字段名。
+4. `startAdvertising()` 仅使用 `serviceName`、`serviceType`、`port`。
+5. `searchPeers()` 发现服务后只基于 `serviceName` / `serviceType` 生成最小 `TransferDiscoveredPeer`，摘要字段填 0。
+6. 搜索确认文件中不再存在 `any`、`unknown`、`txtRecord`。
+7. 执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 8 s 785 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+如后续需要展示真实摘要，先确认当前 SDK 的 mDNS 服务附加信息能力；未确认前保持最小可编译发现实现。
+
+## 2026-07-09 16:10 - 接收页演示连接 UI 构建验证
+
+### 现象
+
+本轮新增接收页演示设备选择、确认码核对和演示连接结果展示，需要确认 ArkTS 编译通过且未误接入真实传输。
+
+### 原因分析
+
+新增 UI 状态集中在 `Index.ets`，主要风险是 `@State` 类型、Builder 渲染条件、TextInput 绑定和按钮回调引发编译错误。
+
+### 处理过程
+
+1. 新增 `selectedDemoPeer`、`demoTransferCodeInput`、`demoConnectionState` 状态。
+2. 演示设备卡片点击后进入“核对确认码”区域。
+3. 新增 6 位确认码输入框和“演示连接”按钮。
+4. 点击“演示连接”只显示演示成功状态，不调用网络或导入逻辑。
+5. 执行局部文本检查。
+6. 执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 11 s 74 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+在模拟器中手动验证演示路径，确认文案明确表达“未进行真实局域网连接”和“未传输便签内容”。
+
+## 2026-07-09 16:25 - 投送倒计时与演示确认码构建验证
+
+### 现象
+
+投送中心发送页和接收页剩余时间不会实时刷新；接收页演示模式任意确认码都能显示成功，文案也容易被理解为真实连接成功。
+
+### 原因分析
+
+剩余时间函数使用当前时间计算，但没有定时更新的 `@State` 触发 ArkUI 重新渲染；演示连接按钮只切换成功状态，没有校验输入确认码。
+
+### 处理过程
+
+1. 新增 `transferClockNow` 状态和 `startTransferClock()` / `stopTransferClock()`。
+2. 每秒更新 `transferClockNow`，驱动发送会话和发现设备剩余时间刷新。
+3. 关闭投送中心、页面退出、取消投送时清理 timer；会话过期时停止发布并提示过期。
+4. 演示设备保存完整 6 位确认码，只展示后两位。
+5. 演示连接按钮增加空值、长度和完整匹配校验。
+6. 执行文本检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 10 s 509 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+手动回归投送中心发送 / 接收两页，重点观察倒计时、过期状态和演示确认码错误提示。
+
+## 2026-07-09 19:04 - 投送倒计时独立组件构建记录
+
+### 现象
+
+发送页倒计时通过 `sendRemainingText` 缓存字符串显示，运行时仍存在不稳定刷新问题。
+
+### 原因分析
+
+发送页倒计时状态链路较长，Text 没有直接依赖一个由倒计时组件自身维护的每秒刷新状态。
+
+### 处理过程
+
+1. 新增 `TransferCountdownText` 组件，内部维护 `@State now` 和 `timerId`。
+2. 组件 `aboutToAppear()` 启动每秒刷新，`aboutToDisappear()` 清理 timer。
+3. 发送页新增倒计时 info item，直接嵌入 `TransferCountdownText({ expiresAt })`。
+4. 接收页 demoLocal 设备卡片也改用同一个 `TransferCountdownText`。
+5. 删除 `sendRemainingText` 状态和 `updateTransferRemainingTexts()` 更新链路。
+6. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+首次构建失败，错误为本轮引入：`Index.ets` 中直接读取 `this.transferSession.expiresAt` 时对象可能为 `undefined`。已改为通过 `sessionExpiresAt()` 返回安全的 `expiresAt` 值。按本轮一次构建限制，修复后未再次执行 `assembleApp`。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`，也没有 `sendRemainingText`、`updateTransferRemainingTexts` 残留。未执行第二次构建。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+下一次构建或 DevEco Studio 验证时确认 `TransferCountdownText` 编译通过，并在发送页停留观察倒计时是否每秒刷新。
+
+## 2026-07-09 18:51 - 真实搜索反馈与发送倒计时构建验证
+
+### 现象
+
+点击“搜索真实设备”后反馈不明显，搜索结束无结果时没有清楚地区分真实搜索空态和单机演示；发送页剩余时间仍可能只在切换页面后刷新。
+
+### 原因分析
+
+搜索中状态只替换了按钮，没有明确的搜索中标题和取消入口；发送页剩余时间仍通过计算方法返回，没有直接绑定独立字符串状态。
+
+### 处理过程
+
+1. 接收页搜索状态改为明确三态展示。
+2. 搜索中显示“正在搜索真实设备”、mDNS 预计 3 秒结束说明和“取消搜索”按钮。
+3. 新增 `cancelRealSearch()`，取消时调用 `stopSearch()` 并回到 empty 状态。
+4. 搜索无结果时显示模拟器环境可能不支持 mDNS 的说明。
+5. 新增 `sendRemainingText`，发送页剩余时间直接显示该状态。
+6. 新增 `updateTransferRemainingTexts()`，在 timer 启动、每秒 tick、会话开启/失败/取消/过期时更新。
+7. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 11 s 515 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+在模拟器中手动验证真实搜索中、取消搜索、真实搜索无结果、单机演示和发送页倒计时持续刷新。
+
+## 2026-07-09 18:42 - 拆分真实搜索与单机演示构建验证
+
+### 现象
+
+接收页真实 mDNS 搜索结果和单机演示结果仍混在一个入口中；真实发现结果没有完整验证码、payload 和摘要却显示“可连接”；发送端倒计时刷新仍不稳定。
+
+### 原因分析
+
+接收页没有把真实搜索入口和单机演示入口固定拆开；真实发现卡片复用了一部分演示卡片状态显示；倒计时只依赖时间戳状态，ArkUI 追踪不够稳定。
+
+### 处理过程
+
+1. 将接收页入口拆为“搜索真实设备”和“单机演示当前发送会话”。
+2. 真实 mDNS 卡片只展示已发现服务、摘要待连接后获取、连接层与确认码校验待接入。
+3. 隐藏真实 mDNS 路径的确认码输入、选择核对按钮和“可连接”状态。
+4. 单机演示入口检查当前 `transferSession`，不存在或过期时只提示开启发送会话，不生成独立验证码。
+5. 新增 `transferClockTick`，每次启动和每秒 tick 同步更新 `transferClockNow` 与 `transferClockTick`。
+6. 发送页和接收页剩余时间通过 `currentTransferNow()` 读取当前时间。
+7. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 8 s 926 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+在模拟器中手动验证真实搜索和单机演示两条入口：真实搜索不出现验证码输入；单机演示必须先开启发送会话，并用发送页完整 6 位确认码通过演示校验。
+
+## 2026-07-09 18:31 - 真实发现与本机演示收敛构建验证
+
+### 现象
+
+接收页把真实 mDNS 发现结果和本机演示结果混用，真实发现结果也可能进入验证码核对 UI；发送页倒计时刷新仍不稳定。
+
+### 原因分析
+
+接收页只用全局演示状态判断是否显示校验入口，没有明确区分真实 mDNS 和本机演示来源；发送页剩余时间虽然内部使用时钟，但 UI 调用没有显式传入 `transferClockNow`。
+
+### 处理过程
+
+1. 增加接收设备来源状态，真实搜索设置为 `mdnsReal`，本机演示设置为 `demoLocal`。
+2. 真实 mDNS 设备只显示服务状态、摘要待获取和连接层待接入提示，不显示输入框或校验按钮。
+3. 演示发现必须存在未过期发送会话，否则提示“请先到发送页开启面对面投送会话”，不再生成独立验证码。
+4. 本机演示设备复用当前 `transferSession` 的确认码、摘要和过期时间。
+5. 剩余时间方法显式接收 `transferClockNow`，发送页和接收页调用时直接传入该 `@State`。
+6. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 10 s 964 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+在模拟器中手动验证真实 mDNS 发现和本机演示两条路径：真实发现不出现验证码输入；本机演示必须先开启发送会话，并只能用发送页完整 6 位确认码通过演示校验。
+
+## 2026-07-09 18:19 - 投送中心接收校验入口与倒计时构建验证
+
+### 现象
+
+接收页发现设备后验证码输入区域不明显；真实 mDNS 发现结果无摘要时显示 0 条便签 / 0 段文本 / 0 张图片 / 0 字符；发送页倒计时在部分路径下没有继续实时刷新。
+
+### 原因分析
+
+设备卡片只有点击行为，没有显式选择按钮；真实发现结果的摘要字段目前可能只能使用安全默认值，页面直接格式化默认 0 值；模式切换时没有主动确保已有会话或设备列表的倒计时 timer 已启动。
+
+### 处理过程
+
+1. 为设备卡片增加“选择并核对确认码”按钮，点击卡片或按钮都会选中设备。
+2. 单个演示/本机绑定设备注入后自动选中，直接显示“核对确认码”区域。
+3. 真实 mDNS 无摘要时显示“摘要待连接后获取”，不显示 0/0/0/0。
+4. 模式切换到已有未过期发送会话或已有接收设备列表时，主动启动 `transferClockNow` timer。
+5. 执行 `Index.ets` 关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 10 s 935 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+在单模拟器中手动验证发送页倒计时、接收页单设备自动显示核对区域、演示确认码正确/错误输入结果，以及真实搜索无摘要时的“摘要待连接后获取”文案。
+
+## 2026-07-09 17:56 - 演示确认码绑定发送会话构建验证
+
+### 现象
+
+发送页显示的确认码和接收页演示设备使用的确认码不是同一个，导致接收页卡片显示的后两位与实际可通过验证码不一致。
+
+### 原因分析
+
+接收页演示设备使用固定 `DEMO_TRANSFER_CODE`，没有优先复用当前发送页已经创建的 `transferSession.transferCode` 和会话摘要。
+
+### 处理过程
+
+1. 新增演示设备是否绑定发送会话的状态。
+2. 点击“演示：模拟发现设备”时，优先读取未过期的 `transferSession`。
+3. 绑定发送会话时，演示设备复用 `transferCode`、后两位、`payloadSummary`、`expiresAt` 和设备名。
+4. 无发送会话时才使用独立演示数据，并显示未绑定提示。
+5. 发送端取消投送或会话过期时，清理绑定的演示设备。
+6. 执行文本检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 11 s 843 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+手动验证单模拟器演示路径，确认发送端确认码、接收端后两位提示和接收端校验通过码完全一致。

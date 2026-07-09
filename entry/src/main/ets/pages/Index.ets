@@ -17,10 +17,14 @@ import {
 import { loadMemos, saveMemos } from '../common/MemoStorage';
 import { TransferImportPreview, decodeTransferPackage, encodeTransferPackage, mergeReceivedMemos, previewTransferImport, summarizeTransferPayload } from '../common/MemoTransfer';
 import { supportedPlatformSummary } from '../common/PlatformTargets';
+import { TransferDiscoveredPeer, searchPeers, startAdvertising, stopAdvertising, stopSearch } from '../common/TransferLanDiscovery';
+import { TransferLanSession, createLocalTransferSession, formatTransferCode, formatRemainingSeconds, isTransferSessionExpired } from '../common/TransferLanSession';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'InstantNote';
 const MAX_TRANSFER_IMPORT_CHARS: number = 20000;
+const LAN_SEARCH_TIMEOUT_MS: number = 3000;
+const DEMO_TRANSFER_CODE: string = '482928';
 
 interface TransferHeader {
   protocol?: string;
@@ -28,6 +32,54 @@ interface TransferHeader {
 }
 
 ensureMemoStoreInitialized();
+
+@Component
+struct TransferCountdownText {
+  @Prop expiresAt: number;
+  @State private now: number = Date.now();
+  private timerId: number = -1;
+
+  aboutToAppear(): void {
+    this.now = Date.now();
+    if (this.timerId >= 0) {
+      return;
+    }
+    this.timerId = setInterval(() => {
+      this.now = Date.now();
+    }, 1000);
+  }
+
+  aboutToDisappear(): void {
+    if (this.timerId < 0) {
+      return;
+    }
+    clearInterval(this.timerId);
+    this.timerId = -1;
+  }
+
+  build() {
+    Text(this.remainingText())
+      .fontSize(13)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#1F2933')
+      .maxLines(1)
+      .width('100%');
+  }
+
+  private remainingText(): string {
+    if (this.expiresAt <= 0) {
+      return '未开启';
+    }
+    if (this.now >= this.expiresAt) {
+      return '已过期';
+    }
+    const remainingMs = Math.max(0, this.expiresAt - this.now);
+    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = remainingSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+}
 
 @Entry
 @Component
@@ -37,10 +89,29 @@ struct Index {
   @State private searchKeyword: string = '';
   @State private showNewMemoForm: boolean = false;
   @State private showTransferPanel: boolean = false;
+  @State private transferClockNow: number = Date.now();
+  @State private transferClockTick: number = 0;
   @State private transferMode: string = 'send';
   @State private transferScope: string = 'all';
+  @State private sendSessionState: string = 'select';
+  @State private isSendSessionOpen: boolean = false;
+  @State private transferSession: TransferLanSession | undefined = undefined;
+  @State private receiveSearchState: string = 'idle';
+  @State private isSearchingPeers: boolean = false;
+  @State private hasSearchedPeers: boolean = false;
+  @State private discoveredPeers: TransferDiscoveredPeer[] = [];
+  @State private receiveSearchError: string = '';
+  @State private receivePeerSource: string = 'mdnsReal';
+  @State private isDemoDiscoveryMode: boolean = false;
+  @State private isDemoBoundToSendSession: boolean = false;
+  @State private selectedDemoPeer: TransferDiscoveredPeer | undefined = undefined;
+  @State private demoTransferCodeInput: string = '';
+  @State private demoTransferCode: string = DEMO_TRANSFER_CODE;
+  @State private demoConnectionState: string = 'idle';
+  @State private demoConnectionError: string = '';
   @State private selectedTransferMemoId: number = -1;
   @State private showTransferMemoPicker: boolean = false;
+  @State private showTransferDebugArea: boolean = false;
   @State private draftTitle: string = '';
   @State private draftTag: string = '';
   @State private draftBodyPreview: string = '';
@@ -63,6 +134,7 @@ struct Index {
   @State private quickButtonPressed: boolean = false;
   @State private pressedPinMemoId: number = -1;
   @State private memosInitialized: boolean = false;
+  private transferClockTimerId: number = -1;
 
   aboutToAppear(): void {
     if (!this.memosInitialized) {
@@ -75,6 +147,10 @@ struct Index {
     setTimeout(() => {
       this.syncMemosFromAppStorage();
     }, 120);
+  }
+
+  aboutToDisappear(): void {
+    this.stopTransferClock();
   }
 
   build() {
@@ -542,7 +618,7 @@ struct Index {
               .fontSize(20)
               .fontWeight(FontWeight.Medium)
               .fontColor(this.palette().textPrimary);
-            Text(this.transferStatusText())
+            Text('局域网发现与传输待接入 / 当前为会话流程预览')
               .fontSize(11)
               .fontColor(this.palette().textMuted)
               .maxLines(2)
@@ -576,10 +652,8 @@ struct Index {
             Column({ space: 10 }) {
               if (this.transferMode === 'send') {
                 this.buildSendPane();
-              } else if (this.transferMode === 'receive') {
-                this.buildReceivePane();
               } else {
-                this.buildDebugPane();
+                this.buildReceivePane();
               }
             }
             .width('100%')
@@ -642,6 +716,15 @@ struct Index {
       .onClick(() => {
         this.transferMode = mode;
         this.feedbackMessage = '';
+        if (this.transferSession !== undefined && !isTransferSessionExpired(this.transferSession, Date.now())) {
+          this.startTransferClock();
+        }
+        if (mode === 'receive' && this.discoveredPeers.length > 0) {
+          this.startTransferClock();
+        }
+        if (mode === 'send') {
+          this.generateTransferPayload();
+        }
       });
   }
 
@@ -654,7 +737,7 @@ struct Index {
         .fontColor(this.palette().textPrimary)
         .width('100%');
 
-      Text('局域网发现与传输层待接入；当前可通过调试 JSON 完成投送验证。')
+      Text('开启后会尝试发布 InstantNote mDNS 服务，发现信息只包含会话摘要，不传输便签内容。')
         .fontSize(12)
         .fontColor(this.palette().textMuted)
         .lineHeight(18)
@@ -670,34 +753,24 @@ struct Index {
         this.buildSelectedTransferMemoCard();
       }
 
-      Column({ space: 6 }) {
-        Text(this.transferSendSummaryText())
-          .fontSize(13)
-          .fontColor(this.palette().textPrimary)
-          .width('100%');
-        if (this.selectedTransferSummary().imageBlockCount > 0) {
-          Text('图片跨设备传输需要后续局域网传输层支持。')
-            .fontSize(12)
-            .fontColor(this.palette().textMuted)
-            .lineHeight(18)
-            .width('100%');
-        }
+      this.buildSendStepCard('1', '选择范围', this.sendStepStatusText('select'), this.sendSessionState === 'select');
+      this.buildSendSessionCard();
+      this.buildSendStepCard('3', '等待接收', this.sendStepStatusText('waiting'), this.sendSessionState === 'waiting');
+      this.buildSendStepCard('4', '完成/失败', this.sendStepStatusText('done'), this.sendSessionState === 'done' || this.sendSessionState === 'failed');
+
+      if (!this.isSendSessionOpen) {
+        Button('开启面对面投送')
+          .width('100%')
+          .height(42)
+          .backgroundColor(this.palette().accent)
+          .fontColor('#FFFFFF')
+          .borderRadius(14)
+          .onClick(() => {
+            void this.openSendSession();
+          });
       }
-      .width('100%')
-      .padding(10)
-      .backgroundColor(this.palette().notePaper)
-      .border({ color: this.palette().border, width: 1 })
-      .borderRadius(12);
 
-      Button('面对面投送待接入')
-        .width('100%')
-        .height(42)
-        .backgroundColor(this.palette().disabledBg)
-        .fontColor(this.palette().disabledText)
-        .borderRadius(14)
-        .enabled(false);
-
-      Button('调试 JSON')
+      Button(this.showTransferDebugArea ? '收起高级：调试 JSON 导入' : '高级：调试 JSON 导入')
         .height(36)
         .width('100%')
         .backgroundColor(this.palette().surface)
@@ -705,17 +778,161 @@ struct Index {
         .border({ color: this.palette().border, width: 1 })
         .borderRadius(12)
         .onClick(() => {
-          this.transferMode = 'debug';
+          this.showTransferDebugArea = !this.showTransferDebugArea;
           this.generateTransferPayload();
         });
 
-      Text('调试 JSON 是当前可用验证入口，不是普通用户最终体验。可长按文本框复制完整投送包，再到接收端粘贴预览。')
-        .fontSize(11)
-        .fontColor(this.palette().textMuted)
-        .lineHeight(16)
-        .width('100%');
+      if (this.showTransferDebugArea) {
+        this.buildDebugPane();
+      }
     }
     .width('100%');
+  }
+
+  @Builder
+  private buildSendStepCard(step: string, title: string, detail: string, active: boolean) {
+    Row({ space: 10 }) {
+      Text(step)
+        .width(26)
+        .height(26)
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(active ? '#FFFFFF' : this.palette().textMuted)
+        .textAlign(TextAlign.Center)
+        .backgroundColor(active ? this.palette().accent : this.palette().surface)
+        .border({ color: active ? this.palette().accent : this.palette().border, width: 1 })
+        .borderRadius(13);
+      Column({ space: 3 }) {
+        Text(title)
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.palette().textPrimary)
+          .width('100%');
+        Text(detail)
+          .fontSize(12)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(17)
+          .width('100%');
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start);
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(active ? this.palette().accentSoft : this.palette().notePaper)
+    .border({ color: active ? this.palette().accent : this.palette().border, width: 1 })
+    .borderRadius(12);
+  }
+
+  @Builder
+  private buildSendSessionCard() {
+    Column({ space: 8 }) {
+      Text('2 面对面投送会话')
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      if (this.isSendSessionOpen) {
+        Row({ space: 8 }) {
+          this.buildSessionInfoItem('设备名', this.localDeviceName());
+          this.buildSessionInfoItem('确认码', this.sessionTransferCodeText());
+        }
+        .width('100%');
+        Row({ space: 8 }) {
+          this.buildSessionInfoItem('状态', '等待附近设备连接');
+          this.buildSessionCountdownItem('剩余时间', this.sessionExpiresAt());
+        }
+        .width('100%');
+        Text(this.sessionPayloadSummaryText())
+          .fontSize(12)
+          .fontColor(this.palette().textPrimary)
+          .lineHeight(17)
+          .width('100%');
+        if (this.sessionHasImageBlocks()) {
+          Text('当前版本图片跨设备传输待接入，文本内容可先验证。')
+            .fontSize(11)
+            .fontColor(this.palette().textMuted)
+            .lineHeight(16)
+            .width('100%');
+        }
+        Text('已尝试发布 mDNS 服务；当前只等待附近设备发现摘要，不传输便签内容。')
+          .fontSize(11)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(16)
+          .width('100%');
+        Button('取消投送')
+          .width('100%')
+          .height(36)
+          .backgroundColor(this.palette().surface)
+          .fontColor(this.palette().danger)
+          .border({ color: this.palette().border, width: 1 })
+          .borderRadius(12)
+          .onClick(() => {
+            void this.cancelSendSession();
+          });
+      } else {
+        Text('点击“开启面对面投送”后，本地生成 6 位确认码并进入等待状态。')
+          .fontSize(12)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(17)
+          .width('100%');
+        Text(`投送摘要：${this.transferSendSummaryText()}`)
+          .fontSize(12)
+          .fontColor(this.palette().textPrimary)
+          .lineHeight(17)
+          .width('100%');
+        if (this.selectedTransferSummary().imageBlockCount > 0) {
+          Text('当前版本图片跨设备传输待接入，文本内容可先验证。')
+            .fontSize(11)
+            .fontColor(this.palette().textMuted)
+            .lineHeight(16)
+            .width('100%');
+        }
+      }
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.isSendSessionOpen ? this.palette().accentSoft : this.palette().notePaper)
+    .border({ color: this.isSendSessionOpen ? this.palette().accent : this.palette().border, width: 1 })
+    .borderRadius(12);
+  }
+
+  @Builder
+  private buildSessionInfoItem(label: string, value: string) {
+    Column({ space: 3 }) {
+      Text(label)
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .width('100%');
+      Text(value)
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .width('100%');
+    }
+    .layoutWeight(1)
+    .padding(8)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(10);
+  }
+
+  @Builder
+  private buildSessionCountdownItem(label: string, expiresAt: number) {
+    Column({ space: 3 }) {
+      Text(label)
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .width('100%');
+      TransferCountdownText({ expiresAt: expiresAt })
+    }
+    .layoutWeight(1)
+    .padding(8)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(10);
   }
 
   @Builder
@@ -828,25 +1045,32 @@ struct Index {
         .fontColor(this.palette().textPrimary)
         .width('100%');
 
-      Text('当前版本可通过粘贴投送内容完成导入验证；局域网搜索附近设备功能待接入。')
+      Text('点击搜索会调用真实 mDNS 发现流程，只展示附近 InstantNote 服务摘要，不请求便签内容。')
         .fontSize(12)
         .fontColor(this.palette().textMuted)
         .lineHeight(18)
         .width('100%');
 
-      Button('搜索附近设备待接入')
-        .width('100%')
-        .height(42)
-        .backgroundColor(this.palette().disabledBg)
-        .fontColor(this.palette().disabledText)
-        .borderRadius(14)
-        .enabled(false);
+      this.buildReceiveSearchCard();
 
-      Text('备用：粘贴投送内容')
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
+      Button(this.showTransferDebugArea ? '收起高级：调试 JSON 导入' : '高级：调试 JSON 导入')
+        .width('100%')
+        .height(38)
+        .backgroundColor(this.palette().surface)
         .fontColor(this.palette().textPrimary)
-        .width('100%');
+        .border({ color: this.palette().border, width: 1 })
+        .borderRadius(12)
+        .onClick(() => {
+          this.showTransferDebugArea = !this.showTransferDebugArea;
+        });
+
+      if (this.showTransferDebugArea) {
+        Column({ space: 10 }) {
+          Text('备用验证入口：粘贴完整 InstantNote JSON 投送包后，必须先预览，再由用户确认导入。')
+            .fontSize(12)
+            .fontColor(this.palette().textMuted)
+            .lineHeight(18)
+            .width('100%');
 
       TextArea({ placeholder: '粘贴完整投送内容', text: this.transferImportText })
         .height(104)
@@ -870,38 +1094,9 @@ struct Index {
         .borderRadius(14)
         .onClick(() => this.previewImportPayload());
 
-      if (this.pendingImportMemos.length > 0) {
-        Column({ space: 6 }) {
-          Text('导入预览')
-            .fontSize(14)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(this.palette().textPrimary)
-            .width('100%');
-          Text(this.importPreviewText())
-            .fontSize(12)
-            .fontColor(this.palette().textMuted)
-            .lineHeight(18)
-            .width('100%');
-          this.buildImportPreviewTitles();
-          Row({ space: 8 }) {
-            Button('取消')
-              .layoutWeight(1)
-              .height(40)
-              .backgroundColor(this.palette().surface)
-              .fontColor(this.palette().textPrimary)
-              .border({ color: this.palette().border, width: 1 })
-              .borderRadius(14)
-              .onClick(() => this.cancelImportPreview());
-
-            Button('确认导入')
-              .layoutWeight(1)
-              .height(40)
-              .backgroundColor(this.palette().accent)
-              .fontColor('#FFFFFF')
-              .borderRadius(14)
-              .onClick(() => this.confirmImportPreview());
+          if (this.pendingImportMemos.length > 0) {
+            this.buildImportPreviewCard();
           }
-          .width('100%');
         }
         .width('100%')
         .padding(10)
@@ -911,6 +1106,287 @@ struct Index {
       }
     }
     .width('100%');
+  }
+
+  @Builder
+  private buildReceiveSearchCard() {
+    Column({ space: 10 }) {
+      Text(this.receiveSearchTitle())
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text(this.receiveSearchDescription())
+        .fontSize(12)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(18)
+        .width('100%');
+
+      if (!this.isSearchingPeers && !this.hasSearchedPeers) {
+        Button('搜索真实设备')
+          .width('100%')
+          .height(42)
+          .backgroundColor(this.palette().accent)
+          .fontColor('#FFFFFF')
+          .borderRadius(14)
+          .onClick(() => {
+            void this.startPeerSearch();
+          });
+      } else if (this.isSearchingPeers) {
+        Text('正在通过 mDNS 搜索附近 InstantNote 服务，预计 3 秒内结束。')
+          .fontSize(12)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(18)
+          .width('100%');
+        Text('搜索中，请稍候...')
+          .fontSize(12)
+          .fontColor(this.palette().accentStrong)
+          .width('100%');
+        Button('取消搜索')
+          .width('100%')
+          .height(40)
+          .backgroundColor(this.palette().surface)
+          .fontColor(this.palette().danger)
+          .border({ color: this.palette().border, width: 1 })
+          .borderRadius(12)
+          .onClick(() => {
+            void this.cancelRealSearch();
+          });
+      } else {
+        if (this.discoveredPeers.length > 0) {
+          this.buildDiscoveredPeerList();
+          if (this.isDemoLocalSource() && this.selectedDemoPeer !== undefined) {
+            this.buildDemoCodeCheckCard();
+          }
+        }
+        if (this.discoveredPeers.length === 0 && this.receiveSearchState === 'empty') {
+          Text('未发现真实设备。当前模拟器环境可能不支持 mDNS 局域网发现，可使用单机演示当前发送会话展示 UI 流程。')
+            .fontSize(12)
+            .fontColor(this.palette().textMuted)
+            .lineHeight(18)
+            .width('100%');
+        }
+        Button('搜索真实设备')
+          .width('100%')
+          .height(40)
+          .backgroundColor(this.palette().accentSoft)
+          .fontColor(this.palette().accentStrong)
+          .borderRadius(14)
+          .onClick(() => {
+            void this.startPeerSearch();
+          });
+      }
+      Button('单机演示当前发送会话')
+        .width('100%')
+        .height(38)
+        .backgroundColor(this.palette().surface)
+        .fontColor(this.palette().accentStrong)
+        .border({ color: this.palette().border, width: 1 })
+        .borderRadius(12)
+        .onClick(() => this.showDemoDiscoveredPeer());
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.palette().notePaper)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(12);
+  }
+
+  @Builder
+  private buildDiscoveredPeerList() {
+    Column({ space: 8 }) {
+      ForEach(this.discoveredPeers, (peer: TransferDiscoveredPeer) => {
+        this.buildDiscoveredPeerCard(peer);
+      }, (peer: TransferDiscoveredPeer) => peer.sessionId);
+    }
+    .width('100%');
+  }
+
+  @Builder
+  private buildDiscoveredPeerCard(peer: TransferDiscoveredPeer) {
+    Column({ space: 5 }) {
+      Row() {
+        Text(peer.deviceName)
+          .fontSize(13)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.palette().textPrimary)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1);
+        Text(this.peerStatusText(peer, this.currentTransferNow()))
+          .fontSize(11)
+          .fontColor(this.isPeerAvailable(peer, this.currentTransferNow()) ? this.palette().success : this.palette().danger);
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center);
+      if (this.isDemoLocalSource()) {
+        Text('演示数据，非真实局域网发现')
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.palette().danger)
+          .width('100%');
+      } else {
+        Text('真实发现服务')
+          .fontSize(11)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(this.palette().accentStrong)
+          .width('100%');
+        Text('连接层与确认码校验待接入')
+          .fontSize(11)
+          .fontColor(this.palette().textMuted)
+          .width('100%');
+      }
+      if (this.isDemoLocalSource()) {
+        Row({ space: 6 }) {
+          Text(`确认码后两位：${peer.transferCodeHint} / 剩余：`)
+            .fontSize(12)
+            .fontColor(this.palette().textMuted);
+          TransferCountdownText({ expiresAt: peer.expiresAt })
+            .layoutWeight(1);
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center);
+      }
+      Text(this.peerSummaryText(peer))
+        .fontSize(12)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(17)
+        .width('100%');
+      if (this.isDemoLocalSource()) {
+        Button('选择并核对确认码')
+          .width('100%')
+          .height(34)
+          .fontSize(12)
+          .backgroundColor(this.palette().accentSoft)
+          .fontColor(this.palette().accentStrong)
+          .borderRadius(10)
+          .onClick(() => this.selectDemoPeer(peer));
+      }
+    }
+    .width('100%')
+    .padding(9)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.isPeerAvailable(peer, this.currentTransferNow()) ? this.palette().border : this.palette().danger, width: 1 })
+    .borderRadius(10)
+    .onClick(() => this.selectDemoPeer(peer));
+  }
+
+  @Builder
+  private buildDemoCodeCheckCard() {
+    Column({ space: 8 }) {
+      Text('核对确认码')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text(`设备名：${this.selectedDemoPeerName()}`)
+        .fontSize(12)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text(`确认码后两位：${this.selectedDemoPeerCodeHint()}`)
+        .fontSize(12)
+        .fontColor(this.palette().textMuted)
+        .width('100%');
+      Text('请输入发送端显示的 6 位确认码')
+        .fontSize(12)
+        .fontColor(this.palette().textMuted)
+        .width('100%');
+      TextInput({ placeholder: '6 位确认码', text: this.demoTransferCodeInput })
+        .height(40)
+        .width('100%')
+        .backgroundColor(this.palette().notePaper)
+        .border({ color: this.palette().border, width: 1 })
+        .borderRadius(12)
+        .fontColor(this.palette().textPrimary)
+        .fontSize(13)
+        .padding({ left: 12, right: 12 })
+        .onChange((value: string) => {
+          this.demoTransferCodeInput = value;
+          this.demoConnectionState = 'idle';
+          this.demoConnectionError = '';
+        });
+      if (this.demoConnectionError.length > 0) {
+        Text(this.demoConnectionError)
+          .fontSize(12)
+          .fontColor(this.palette().danger)
+          .width('100%');
+      }
+      Button(this.codeCheckButtonText())
+        .width('100%')
+        .height(38)
+        .backgroundColor(this.palette().accentSoft)
+        .fontColor(this.palette().accentStrong)
+        .borderRadius(12)
+        .onClick(() => this.showDemoConnectionSuccess());
+      if (this.demoConnectionState === 'success') {
+        Column({ space: 4 }) {
+          Text('演示校验通过')
+            .fontSize(13)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(this.palette().success)
+            .width('100%');
+          Text('未建立真实局域网连接')
+            .fontSize(12)
+            .fontColor(this.palette().textMuted)
+            .width('100%');
+          Text('未传输便签内容')
+            .fontSize(12)
+            .fontColor(this.palette().textMuted)
+            .width('100%');
+        }
+        .width('100%')
+        .padding(8)
+        .backgroundColor(this.palette().surface)
+        .border({ color: this.palette().border, width: 1 })
+        .borderRadius(10);
+      }
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.palette().notePaper)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(12);
+  }
+
+  @Builder
+  private buildImportPreviewCard() {
+    Column({ space: 6 }) {
+      Text('导入预览')
+        .fontSize(14)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text(this.importPreviewText())
+        .fontSize(12)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(18)
+        .width('100%');
+      this.buildImportPreviewTitles();
+      Row({ space: 8 }) {
+        Button('取消')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.palette().surface)
+          .fontColor(this.palette().textPrimary)
+          .border({ color: this.palette().border, width: 1 })
+          .borderRadius(14)
+          .onClick(() => this.cancelImportPreview());
+
+        Button('确认导入')
+          .layoutWeight(1)
+          .height(40)
+          .backgroundColor(this.palette().accent)
+          .fontColor('#FFFFFF')
+          .borderRadius(14)
+          .onClick(() => this.confirmImportPreview());
+      }
+      .width('100%');
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(12);
   }
 
   @Builder
@@ -1196,7 +1672,30 @@ struct Index {
   }
 
   private openTransferPanel(): void {
+    const hasActiveSession = this.transferSession !== undefined && !isTransferSessionExpired(this.transferSession, Date.now());
     this.transferMode = 'send';
+    if (hasActiveSession) {
+      this.sendSessionState = 'waiting';
+      this.isSendSessionOpen = true;
+    } else {
+      this.sendSessionState = 'select';
+      this.isSendSessionOpen = false;
+      this.transferSession = undefined;
+    }
+    this.receiveSearchState = 'idle';
+    this.isSearchingPeers = false;
+    this.hasSearchedPeers = false;
+    this.discoveredPeers = [];
+    this.receiveSearchError = '';
+    this.receivePeerSource = 'mdnsReal';
+    this.isDemoDiscoveryMode = false;
+    this.isDemoBoundToSendSession = false;
+    this.selectedDemoPeer = undefined;
+    this.demoTransferCodeInput = '';
+    this.demoTransferCode = DEMO_TRANSFER_CODE;
+    this.demoConnectionState = 'idle';
+    this.demoConnectionError = '';
+    this.showTransferDebugArea = false;
     this.ensureSelectedTransferMemo();
     this.generateTransferPayload();
     this.transferImportText = '';
@@ -1204,16 +1703,328 @@ struct Index {
     this.pendingImportPreview = { addCount: 0, updateCount: 0, imageBlockCount: 0 };
     this.feedbackMessage = '';
     this.showTransferPanel = true;
+    if (hasActiveSession) {
+      this.startTransferClock();
+    }
   }
 
   private closeTransferPanel(): void {
+    if (this.isSendSessionOpen) {
+      void this.cancelSendSession();
+    }
+    void stopSearch();
+    this.stopTransferClock();
     this.showTransferPanel = false;
+  }
+
+  private startTransferClock(): void {
+    this.transferClockNow = Date.now();
+    this.transferClockTick = this.transferClockTick + 1;
+    if (this.transferClockTimerId >= 0) {
+      return;
+    }
+    this.transferClockTimerId = setInterval(() => {
+      this.handleTransferClockTick();
+    }, 1000);
+  }
+
+  private stopTransferClock(): void {
+    if (this.transferClockTimerId < 0) {
+      return;
+    }
+    clearInterval(this.transferClockTimerId);
+    this.transferClockTimerId = -1;
+  }
+
+  private handleTransferClockTick(): void {
+    this.transferClockNow = Date.now();
+    this.transferClockTick = this.transferClockTick + 1;
+    if (this.transferSession !== undefined && isTransferSessionExpired(this.transferSession, this.transferClockNow)) {
+      void this.expireSendSession();
+    }
+    this.removeExpiredDiscoveredPeers();
+  }
+
+  private currentTransferNow(): number {
+    return this.transferClockNow + this.transferClockTick * 0;
+  }
+
+  private async expireSendSession(): Promise<void> {
+    if (!this.isSendSessionOpen && this.transferSession === undefined) {
+      return;
+    }
+    try {
+      await stopAdvertising();
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop expired LAN advertising. Cause: %{public}s', JSON.stringify(error));
+    } finally {
+      this.isSendSessionOpen = false;
+      this.transferSession = undefined;
+      this.sendSessionState = 'failed';
+      this.feedbackMessage = '投送会话已过期，请重新开启';
+      this.clearBoundDemoPeer();
+    }
+  }
+
+  private removeExpiredDiscoveredPeers(): void {
+    if (this.discoveredPeers.length === 0) {
+      return;
+    }
+    const currentPeers: TransferDiscoveredPeer[] = [];
+    for (let i = 0; i < this.discoveredPeers.length; i++) {
+      if (this.discoveredPeers[i].expiresAt > this.transferClockNow) {
+        currentPeers.push(this.discoveredPeers[i]);
+      }
+    }
+    if (currentPeers.length !== this.discoveredPeers.length) {
+      this.discoveredPeers = currentPeers;
+      if (this.selectedDemoPeer !== undefined && !this.hasDiscoveredPeer(this.selectedDemoPeer.sessionId)) {
+        this.selectedDemoPeer = undefined;
+        this.demoTransferCodeInput = '';
+        this.demoConnectionState = 'idle';
+        this.demoConnectionError = '';
+      }
+      if (this.discoveredPeers.length === 0 && this.hasSearchedPeers) {
+        this.receiveSearchState = 'empty';
+      }
+    }
+  }
+
+  private hasDiscoveredPeer(sessionId: string): boolean {
+    for (let i = 0; i < this.discoveredPeers.length; i++) {
+      if (this.discoveredPeers[i].sessionId === sessionId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private generateTransferPayload(): void {
     this.ensureSelectedTransferMemo();
     this.transferPayload = encodeTransferPackage(this.getTransferMemosForCurrentScope());
     this.feedbackMessage = '';
+  }
+
+  private async openSendSession(): Promise<void> {
+    this.generateTransferPayload();
+    const session = createLocalTransferSession(this.getTransferMemosForCurrentScope(), this.localDeviceName());
+    try {
+      await startAdvertising(session);
+      this.transferSession = session;
+      this.isSendSessionOpen = true;
+      this.sendSessionState = 'waiting';
+      this.feedbackMessage = '已开启面对面投送，正在发布附近可发现服务';
+      this.startTransferClock();
+    } catch (error) {
+      this.transferSession = undefined;
+      this.isSendSessionOpen = false;
+      this.sendSessionState = 'failed';
+      this.feedbackMessage = '发布附近服务失败，请确认网络权限和同一 Wi-Fi 后重试';
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to start LAN advertising. Cause: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private async cancelSendSession(): Promise<void> {
+    try {
+      await stopAdvertising();
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop LAN advertising. Cause: %{public}s', JSON.stringify(error));
+    } finally {
+      this.isSendSessionOpen = false;
+      this.transferSession = undefined;
+      this.sendSessionState = 'select';
+      this.feedbackMessage = '已取消投送';
+      this.clearBoundDemoPeer();
+      this.stopTransferClock();
+    }
+  }
+
+  private async startPeerSearch(): Promise<void> {
+    this.isSearchingPeers = true;
+    this.hasSearchedPeers = false;
+    this.discoveredPeers = [];
+    this.receiveSearchError = '';
+    this.receivePeerSource = 'mdnsReal';
+    this.isDemoDiscoveryMode = false;
+    this.isDemoBoundToSendSession = false;
+    this.selectedDemoPeer = undefined;
+    this.demoTransferCodeInput = '';
+    this.demoConnectionState = 'idle';
+    this.demoConnectionError = '';
+    this.receiveSearchState = 'searching';
+    this.feedbackMessage = '';
+    try {
+      const peers = await searchPeers(LAN_SEARCH_TIMEOUT_MS);
+      if (!this.isSearchingPeers && this.receiveSearchError === '已取消搜索真实设备') {
+        return;
+      }
+      this.discoveredPeers = peers;
+      this.isSearchingPeers = false;
+      this.hasSearchedPeers = true;
+      this.receiveSearchState = peers.length > 0 ? 'found' : 'empty';
+      if (peers.length === 0) {
+        this.receiveSearchError = '未发现真实设备。当前模拟器环境可能不支持 mDNS 局域网发现，可使用单机演示当前发送会话展示 UI 流程。';
+      }
+      if (peers.length > 0) {
+        this.startTransferClock();
+      }
+    } catch (error) {
+      this.discoveredPeers = [];
+      this.isSearchingPeers = false;
+      this.hasSearchedPeers = true;
+      this.receiveSearchState = 'failed';
+      this.receiveSearchError = '真实搜索失败，请检查网络权限或模拟器 mDNS 支持。';
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to search LAN peers. Cause: %{public}s', JSON.stringify(error));
+    }
+  }
+
+  private async cancelRealSearch(): Promise<void> {
+    try {
+      await stopSearch();
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to cancel LAN search. Cause: %{public}s', JSON.stringify(error));
+    } finally {
+      this.isSearchingPeers = false;
+      this.hasSearchedPeers = true;
+      this.receiveSearchState = 'empty';
+      this.receiveSearchError = '已取消搜索真实设备';
+    }
+  }
+
+  private showDemoDiscoveredPeer(): void {
+    this.transferClockNow = Date.now();
+    this.transferClockTick = this.transferClockTick + 1;
+    if (this.transferSession === undefined || isTransferSessionExpired(this.transferSession, this.transferClockNow)) {
+      this.isSearchingPeers = false;
+      this.hasSearchedPeers = true;
+      this.receiveSearchState = this.discoveredPeers.length > 0 ? 'found' : 'empty';
+      this.receiveSearchError = '请先到发送页开启面对面投送会话';
+      this.receivePeerSource = 'mdnsReal';
+      this.isDemoDiscoveryMode = false;
+      this.isDemoBoundToSendSession = false;
+      this.selectedDemoPeer = undefined;
+      this.demoTransferCodeInput = '';
+      this.demoConnectionState = 'idle';
+      this.demoConnectionError = '';
+      return;
+    }
+    this.isSearchingPeers = false;
+    this.hasSearchedPeers = true;
+    this.receiveSearchState = 'found';
+    this.receiveSearchError = '';
+    this.receivePeerSource = 'demoLocal';
+    this.isDemoDiscoveryMode = true;
+    this.isDemoBoundToSendSession = true;
+    this.selectedDemoPeer = undefined;
+    this.demoTransferCodeInput = '';
+    this.demoConnectionState = 'idle';
+    this.demoConnectionError = '';
+    this.demoTransferCode = this.transferSession.transferCode;
+    this.discoveredPeers = [this.createDemoPeerFromSession(this.transferSession)];
+    if (this.discoveredPeers.length === 1) {
+      this.selectDemoPeer(this.discoveredPeers[0]);
+    }
+    this.startTransferClock();
+  }
+
+  private createDemoPeerFromSession(session: TransferLanSession): TransferDiscoveredPeer {
+    const summary = session.payloadSummary;
+    const deviceName = session.deviceName.length > 0 ? session.deviceName : this.localDeviceName();
+    return {
+      sessionId: session.sessionId,
+      deviceName: deviceName,
+      transferCodeHint: this.createCodeHint(session.transferCode),
+      expiresAt: session.expiresAt,
+      memoCount: summary.memoCount,
+      textBlockCount: summary.textBlockCount,
+      imageBlockCount: summary.imageBlockCount,
+      charCount: summary.charCount,
+      protocolVersion: 1,
+      isCompatible: true
+    };
+  }
+
+  private clearBoundDemoPeer(): void {
+    if (!this.isDemoDiscoveryMode || !this.isDemoBoundToSendSession) {
+      return;
+    }
+    this.discoveredPeers = [];
+    this.selectedDemoPeer = undefined;
+    this.demoTransferCodeInput = '';
+    this.demoConnectionState = 'idle';
+    this.demoConnectionError = '';
+    this.isDemoBoundToSendSession = false;
+    this.isDemoDiscoveryMode = false;
+    this.receivePeerSource = 'mdnsReal';
+    this.receiveSearchState = this.hasSearchedPeers ? 'empty' : 'idle';
+  }
+
+  private createCodeHint(code: string): string {
+    if (code.length <= 2) {
+      return code;
+    }
+    return code.slice(code.length - 2);
+  }
+
+  private selectDemoPeer(peer: TransferDiscoveredPeer): void {
+    if (!this.isDemoLocalSource()) {
+      return;
+    }
+    this.selectedDemoPeer = peer;
+    this.demoTransferCodeInput = '';
+    this.demoConnectionState = 'idle';
+    this.demoConnectionError = '';
+  }
+
+  private codeCheckButtonText(): string {
+    return '演示校验';
+  }
+
+  private isDemoLocalSource(): boolean {
+    return this.receivePeerSource === 'demoLocal' && this.isDemoDiscoveryMode && this.isDemoBoundToSendSession;
+  }
+
+  private selectedDemoPeerName(): string {
+    if (this.selectedDemoPeer === undefined) {
+      return '未选择设备';
+    }
+    return this.selectedDemoPeer.deviceName;
+  }
+
+  private selectedDemoPeerCodeHint(): string {
+    if (this.selectedDemoPeer === undefined) {
+      return '--';
+    }
+    return this.selectedDemoPeer.transferCodeHint;
+  }
+
+  private showDemoConnectionSuccess(): void {
+    if (this.selectedDemoPeer === undefined) {
+      return;
+    }
+    if (!this.isDemoLocalSource()) {
+      this.demoConnectionError = '连接层与确认码校验待接入';
+      this.demoConnectionState = 'idle';
+      return;
+    }
+    const code = this.demoTransferCodeInput.trim();
+    if (code.length === 0) {
+      this.demoConnectionError = '请输入发送端显示的 6 位确认码';
+      this.demoConnectionState = 'idle';
+      return;
+    }
+    if (code.length !== 6) {
+      this.demoConnectionError = '确认码需要 6 位';
+      this.demoConnectionState = 'idle';
+      return;
+    }
+    if (code !== this.demoTransferCode) {
+      this.demoConnectionError = '确认码不匹配，请重新核对';
+      this.demoConnectionState = 'idle';
+      return;
+    }
+    this.demoConnectionError = '';
+    this.demoConnectionState = 'success';
   }
 
   private previewImportPayload(): void {
@@ -1269,11 +2080,6 @@ struct Index {
     this.pendingImportPreview = { addCount: 0, updateCount: 0, imageBlockCount: 0 };
   }
 
-  private transferStatusText(): string {
-    const summary = summarizeTransferPayload(this.getTransferMemosForCurrentScope(), this.transferPayload);
-    return `${summary.memoCount} 条便签 / ${summary.textBlockCount} 段文本 / ${summary.imageBlockCount} 张图片 / ${summary.payloadBytes} 字符`;
-  }
-
   private getTransferMemosForCurrentScope(): Memo[] {
     if (this.transferScope === 'selected') {
       const memo = this.getSelectedTransferMemo();
@@ -1290,6 +2096,148 @@ struct Index {
   private transferSendSummaryText(): string {
     const summary = this.selectedTransferSummary();
     return `${summary.memoCount} 条便签 / ${summary.textBlockCount} 段文本 / ${summary.imageBlockCount} 张图片 / ${summary.payloadBytes} 字符`;
+  }
+
+  private sessionTransferCodeText(): string {
+    if (this.transferSession === undefined) {
+      return '未生成';
+    }
+    return formatTransferCode(this.transferSession.transferCode);
+  }
+
+  private sessionExpiresAt(): number {
+    if (this.transferSession === undefined) {
+      return 0;
+    }
+    return this.transferSession.expiresAt;
+  }
+
+  private sessionRemainingText(now: number): string {
+    if (this.transferSession === undefined) {
+      return '未开启';
+    }
+    if (isTransferSessionExpired(this.transferSession, now)) {
+      return '已过期';
+    }
+    return formatRemainingSeconds(this.transferSession, now);
+  }
+
+  private sessionPayloadSummaryText(): string {
+    if (this.transferSession === undefined) {
+      return '投送摘要：未生成';
+    }
+    const summary = this.transferSession.payloadSummary;
+    return `投送摘要：${summary.memoCount} 条便签 / ${summary.textBlockCount} 段文本 / ${summary.imageBlockCount} 张图片 / ${summary.charCount} 字符`;
+  }
+
+  private sessionHasImageBlocks(): boolean {
+    if (this.transferSession === undefined) {
+      return false;
+    }
+    return this.transferSession.payloadSummary.imageBlockCount > 0;
+  }
+
+  private sendStepStatusText(step: string): string {
+    if (step === 'select') {
+      return this.transferScope === 'selected' ? '已选择单条便签作为投送范围' : '已选择全部便签作为投送范围';
+    }
+    if (step === 'created') {
+      if (!this.isSendSessionOpen) {
+        return '点击“开启面对面投送”后显示设备名、确认码和等待状态';
+      }
+      return '会话已开启为本地 UI 预览；局域网发现与真实传输待接入';
+    }
+    if (step === 'waiting') {
+      return this.sendSessionState === 'waiting' ? '等待附近设备连接' : '创建会话后进入等待接收状态';
+    }
+    if (this.sendSessionState === 'done') {
+      return '流程预览完成，未执行真实两机传输';
+    }
+    if (this.sendSessionState === 'failed') {
+      return '流程预览失败，真实失败原因需网络层接入后返回';
+    }
+    return '尚未完成或失败';
+  }
+
+  private localDeviceName(): string {
+    return '本机 InstantNote';
+  }
+
+  private receiveSearchTitle(): string {
+    if (this.isSearchingPeers) {
+      return '正在搜索真实设备';
+    }
+    if (this.receiveSearchState === 'failed') {
+      return '搜索失败';
+    }
+    if (this.isDemoDiscoveryMode && this.discoveredPeers.length > 0) {
+      return `演示发现 ${this.discoveredPeers.length} 台设备`;
+    }
+    if (this.discoveredPeers.length > 0) {
+      return `发现 ${this.discoveredPeers.length} 台设备`;
+    }
+    if (this.hasSearchedPeers) {
+      return '未发现附近设备';
+    }
+    return '未发现附近设备';
+  }
+
+  private receiveSearchDescription(): string {
+    if (this.isSearchingPeers) {
+      return '正在通过 mDNS 搜索附近 InstantNote 服务，预计 3 秒内结束。';
+    }
+    if (this.receiveSearchState === 'failed') {
+      return this.receiveSearchError.length > 0 ? this.receiveSearchError : '搜索失败，请稍后重试。';
+    }
+    if (this.receiveSearchError.length > 0) {
+      return this.receiveSearchError;
+    }
+    if (this.isDemoLocalSource() && this.discoveredPeers.length > 0) {
+      return '当前列表来自演示模式，只用于课堂展示发现设备后的 UI，不代表真实局域网发现或传输成功。';
+    }
+    if (this.discoveredPeers.length > 0) {
+      return '已发现真实 mDNS 服务；连接层与确认码校验待接入，当前不请求便签内容。';
+    }
+    if (this.hasSearchedPeers) {
+      return '暂未发现附近设备。请确认两台设备连接同一 Wi-Fi，并确认发送端已开启面对面投送。';
+    }
+    return '请确认两台设备连接同一 Wi-Fi，并确认发送端已开启面对面投送。';
+  }
+
+  private peerSummaryText(peer: TransferDiscoveredPeer): string {
+    if (!this.isDemoLocalSource()) {
+      return '摘要待连接后获取';
+    }
+    return `摘要：${peer.memoCount} 条便签 / ${peer.textBlockCount} 段文本 / ${peer.imageBlockCount} 张图片 / ${peer.charCount} 字符`;
+  }
+
+  private peerHasSummary(peer: TransferDiscoveredPeer): boolean {
+    return peer.memoCount > 0 || peer.textBlockCount > 0 || peer.imageBlockCount > 0 || peer.charCount > 0;
+  }
+
+  private peerRemainingText(peer: TransferDiscoveredPeer, now: number): string {
+    const remainingMs = Math.max(0, peer.expiresAt - now);
+    if (remainingMs <= 0) {
+      return '已过期';
+    }
+    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    const minutes = Math.floor(remainingSeconds / 60);
+    const seconds = remainingSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  }
+
+  private isPeerAvailable(peer: TransferDiscoveredPeer, now: number): boolean {
+    return peer.isCompatible && peer.expiresAt > now;
+  }
+
+  private peerStatusText(peer: TransferDiscoveredPeer, now: number): string {
+    if (peer.expiresAt <= now) {
+      return '已过期';
+    }
+    if (!this.isDemoLocalSource()) {
+      return '已发现服务';
+    }
+    return peer.isCompatible ? '可连接' : '版本不兼容';
   }
 
   private getSortedTransferMemos(): Memo[] {
@@ -1356,7 +2304,7 @@ struct Index {
 
   private importPreviewText(): string {
     const imageText = this.pendingImportPreview.imageBlockCount > 0 ?
-      `包含 ${this.pendingImportPreview.imageBlockCount} 个图片块；图片暂不支持跨设备恢复。` :
+      `包含 ${this.pendingImportPreview.imageBlockCount} 个图片块；当前版本图片跨设备传输待接入，文本内容可先验证。` :
       '不包含图片块。';
     const total = this.pendingImportMemos.length;
     return `将导入 ${total} 条便签；新增 ${this.pendingImportPreview.addCount} 条，更新 ${this.pendingImportPreview.updateCount} 条。${imageText}`;
