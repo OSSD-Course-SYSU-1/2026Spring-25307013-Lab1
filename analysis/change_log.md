@@ -1,5 +1,90 @@
 ﻿# 代码变更日志
 
+## 2026-07-09 21:39 - 完善本机回环测试展示与能力状态
+
+### 修改目标
+
+完善投送中心发送页的本机回环测试展示，让单模拟器环境下能清楚说明传输层测试结果和当前真实完成度。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：新增“本机传输层测试结果”卡片；测试通过后逐项显示本机服务、sessionId、6 位确认码、文本 payload、投送包解码和导入预览状态；新增“当前能力状态”卡片，区分已完成、待验证和待接入能力。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建验证结果。
+
+### 修改原因
+
+课堂演示需要在单模拟器环境下清楚展示目前只验证了本机回环链路，避免误导为真实跨设备投送已经完成。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`；命中的 `...` 均为普通文本省略号。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。
+
+### 当前状态
+
+成功。页面明确显示“该测试仅验证单机回环传输层，不代表真实跨设备投送成功”；能力状态卡片明确标注真实双机 mDNS 发现和 TCP 连接仍待验证、图片二进制传输待接入。
+
+### 后续建议
+
+后续完成真实 TCP server/client 后，再用同一测试结果卡片扩展运行态细节，并补双机局域网实测记录。
+
+## 2026-07-09 21:23 - 增加本机回环传输层测试入口
+
+### 修改目标
+
+在投送中心发送页增加“测试本机传输层”按钮，用于单个 DevEco 模拟器验证传输层 request、payload、decode 和 preview 链路。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：发送会话开启后显示回环测试说明和“测试本机传输层”按钮；调用 `requestTransferPayload('127.0.0.1', TRANSFER_TEXT_PORT, sessionId, transferCode)`；成功后执行 `decodeTransferPackage()` 和 `previewTransferImport()`，只展示预览摘要，不调用合并导入。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建验证结果。
+
+### 修改原因
+
+单模拟器课堂展示需要在不接收真实设备、不导入便签的前提下，验证发送端传输层能否通过本机回环取回 payload 并进入预览链路。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`；命中的 `...` 均为普通文本省略号。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。
+
+### 当前状态
+
+成功。按钮仅在发送会话开启后显示；测试文案明确“本测试仅验证单机回环传输层，不代表真实跨设备投送成功”；测试成功只显示预览摘要，未执行 `mergeReceivedMemos()`。
+
+### 后续建议
+
+待 `TransferLanTransport.ets` 的真实 TCP server/client 实现完成后，在单模拟器回环和双设备局域网中分别验证请求成功、确认码错误失败、payload 解码和预览摘要。
+
+## 2026-07-09 21:11 - 发送端会话接入传输服务
+
+### 修改目标
+
+发送端点击“开启面对面投送”后，先启动文本投送传输服务，再发布 mDNS 服务；取消投送时同时关闭 mDNS 发布和传输服务。
+
+### 修改文件
+
+- `entry/src/main/ets/pages/Index.ets`：发送端开启会话时调用 `startTransferServer(session, selectedMemos)`，传输服务启动成功后再调用 `startAdvertising(session)`；发送页增加传输服务和 mDNS 发布状态展示；取消、过期清理时调用 `stopTransferServer()`。
+- `entry/src/main/ets/common/TransferLanDiscovery.ets`：mDNS 发布端口改为复用 `TransferLanTransport` 的 `TRANSFER_TEXT_PORT`，保持发现服务端口与传输监听端口一致。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次构建验证结果。
+
+### 修改原因
+
+发送端需要把已创建的本地投送会话与真实传输层启动顺序串起来，并避免在传输服务未启动时对外发布可发现的 mDNS 服务。
+
+### 验证方式
+
+已搜索确认 `Index.ets` 和 `TransferLanDiscovery.ets` 中没有新增禁用写法；已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功，输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。发送端开启流程已接入传输服务启动调用，成功后发布 mDNS；取消投送会停止 mDNS 发布和传输服务。接收端、导入逻辑、图片二进制传输均未修改。
+
+### 后续建议
+
+下一步需要在允许修改 `TransferLanTransport.ets` 时，把当前传输服务的 TCP 监听占位实现替换为可用的 NetworkKit socket server。
+
 ## 2026-07-09 03:23 - 复核发送端 mDNS 发布实现
 
 ### 修改目标
@@ -1310,6 +1395,34 @@ AppStorage 是编辑页返回首页时的即时同步数据源；Preferences 只
 ### 后续建议
 
 在模拟器中手动验证：发送端开启投送后观察倒计时连续变化；接收页演示设备输入空值、短码、错误 6 位和正确 6 位确认码。
+
+## 2026-07-09 21:06 - 新增局域网投送传输层模块
+
+### 修改目标
+
+新增 `TransferLanTransport.ets`，提供第一阶段文本投送 payload 生成能力，并为后续 TCP server/client 接入预留传输层接口。
+
+### 修改文件
+
+- `entry/src/main/ets/common/TransferLanTransport.ets`：新增传输请求/响应接口、server 状态枚举、文本传输端口常量、文本块过滤函数、文本 payload 生成函数、会话与确认码校验响应构造函数，以及明确 failed 的 server/client 占位实现。
+- `analysis/change_log.md`：追加本次任务记录。
+- `analysis/solve_logs.md`：记录本次关键词检查和构建结果。
+
+### 修改原因
+
+真实局域网投送需要独立传输层承接发现后的 payload 请求。本轮先完成文本 payload 过滤与编码，避免把图片二进制或本地图片 URI 传出；socket 监听和客户端读写签名未在本轮完全确认，因此不伪造传输成功。
+
+### 验证方式
+
+已搜索确认新文件中没有 `any`、`unknown`、对象 spread。已执行一次 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功；输出包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 当前状态
+
+成功。文本 payload 生成逻辑可编译；server/client 接口存在但返回明确 failed 状态，等待下一轮确认并接入 `@kit.NetworkKit` socket TCP 监听、连接、发送和接收细节。
+
+### 后续建议
+
+下一轮只确认并实现 `@kit.NetworkKit` socket 的最小 TCP server/client 读写闭环，同时补充 `module.json5` 是否需要 `ohos.permission.INTERNET` 的独立确认记录。
 
 ## 2026-07-09 19:04 - 投送倒计时独立组件修复
 

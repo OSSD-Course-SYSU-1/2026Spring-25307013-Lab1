@@ -1,10 +1,11 @@
 import { common } from '@kit.AbilityKit';
 import { mdns } from '@kit.NetworkKit';
 import { TransferLanSession } from './TransferLanSession';
+import { TRANSFER_TEXT_PORT } from './TransferLanTransport';
 
 const TRANSFER_PROTOCOL_VERSION: number = 1;
 const TRANSFER_SERVICE_TYPE: string = '_instantnote._tcp';
-const TRANSFER_SERVICE_PORT: number = 0;
+const TRANSFER_SERVICE_PORT: number = TRANSFER_TEXT_PORT;
 const SERVICE_NAME_PREFIX: string = 'InstantNote';
 
 let activeServiceInfo: mdns.LocalServiceInfo | undefined = undefined;

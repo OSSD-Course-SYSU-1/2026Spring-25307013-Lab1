@@ -1,5 +1,95 @@
 ﻿# 问题解决日志
 
+## 2026-07-09 21:39 - 本机回环测试展示与能力状态构建验证
+
+### 现象
+
+本机回环测试只有单行结果提示，课堂演示时无法清楚说明哪些链路已验证、哪些仍未完成。
+
+### 原因分析
+
+发送页缺少专门的测试结果卡片和能力状态说明，容易把单机回环测试误解为真实跨设备投送已完成。
+
+### 处理过程
+
+1. 新增 `localTransportTestPassed` 状态，避免依赖文案前缀判断测试是否成功。
+2. 新增“本机传输层测试结果”卡片，成功后显示本机服务、sessionId、6 位确认码、文本 payload、解码和导入预览状态。
+3. 新增“当前能力状态”卡片，明确已完成、待验证和待接入能力。
+4. 保留原有 `requestTransferPayload()`、`decodeTransferPackage()`、`previewTransferImport()` 链路，不调用导入合并。
+5. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 11 s 969 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`；命中的 `...` 均为普通文本省略号。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+真实 TCP server/client 接入后，需要用单机回环和双机局域网分别验证状态卡片显示是否与实际能力一致。
+
+## 2026-07-09 21:23 - 本机回环传输层测试入口构建验证
+
+### 现象
+
+需要在单个 DevEco 模拟器中验证 `TransferLanTransport` 的本机回环请求、payload 解码和导入预览链路，但不能执行真实导入或跨设备伪成功。
+
+### 原因分析
+
+现有高级 JSON 调试导入只能手工粘贴 payload，无法验证 `requestTransferPayload()` 调用路径；发送页需要一个明确标注为单机回环测试的入口。
+
+### 处理过程
+
+1. 发送会话卡片在会话开启后显示“测试本机传输层”按钮。
+2. 点击后使用当前 `transferSession.sessionId`、`transferSession.transferCode` 和 `TRANSFER_TEXT_PORT` 请求 `127.0.0.1`。
+3. 请求成功后调用 `decodeTransferPackage()` 和 `previewTransferImport()`。
+4. 页面只显示测试结果和预览摘要，不调用 `mergeReceivedMemos()`。
+5. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 11 s 693 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认 `Index.ets` 中没有 `any`、`unknown`、`stopPropagation`；命中的 `...` 均为普通文本省略号。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+当前测试入口按真实 `requestTransferPayload()` 调用；若 `TransferLanTransport.ets` 的 TCP client/server 仍返回未接入错误，页面会显示失败原因。后续应先完成传输层实现，再做单机回环和双设备验证。
+
+## 2026-07-09 21:11 - 发送端传输服务接入构建验证
+
+### 现象
+
+发送端开启面对面投送后，需要先启动文本传输服务，再发布 mDNS 服务，并在取消投送时同时停止两者。
+
+### 原因分析
+
+此前发送页只负责创建会话和发布 mDNS，未调用传输层启动/停止接口；mDNS 发布端口也需要与传输层固定端口保持一致。
+
+### 处理过程
+
+1. 发送端开启会话时先根据当前选择范围取得待投送便签。
+2. 调用 `startTransferServer(session, selectedMemos)`，成功后再调用 `startAdvertising(session)`。
+3. 取消和过期清理路径调用 `stopAdvertising()` 后继续调用 `stopTransferServer()`。
+4. mDNS 发布端口改为复用 `TRANSFER_TEXT_PORT`。
+5. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 12 s 266 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已执行 `D:\DevEcoStudio\tools\hvigor\bin\hvigorw.bat assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+`TransferLanTransport.ets` 当前 TCP 监听仍是占位失败结果；后续允许修改传输层时，应接入可用 NetworkKit socket server，再做端到端发送/接收验证。
+
 ## 2026-07-09 03:23 - 发送端 mDNS 发布复核构建验证
 
 ### 现象
@@ -1255,6 +1345,37 @@ Preferences 已持久化成功，但 Index 页面返回时仍使用旧 `this.mem
 ### 后续建议
 
 手动回归投送中心发送 / 接收两页，重点观察倒计时、过期状态和演示确认码错误提示。
+
+## 2026-07-09 21:06 - 局域网投送传输层模块构建验证
+
+### 现象
+
+当前工程已有 mDNS 发现层和投送中心 UI，但没有独立的真实局域网 payload 传输层模块。
+
+### 原因分析
+
+发现层只负责找到 InstantNote 服务，不应该传输完整便签内容；传输层需要单独负责文本 payload 过滤、会话校验、确认码校验和后续 TCP 读写。
+
+### 处理过程
+
+1. 新增 `TransferLanTransport.ets`。
+2. 定义 `TransferTransportRequest`、`TransferTransportResponse` 和 `TransferTransportServerState`。
+3. 新增 `sanitizeMemosForTextTransfer()`，只保留标题、标签、预览、时间、置顶标记和文本块，不保留 image 块。
+4. 新增 `createTextTransferPayload()`，复用 `MemoTransfer.encodeTransferPackage()` 生成 JSON 字符串。
+5. 新增 server/client 接口，但因本轮未确认完整 TCP 监听、连接、发送、接收签名，返回明确 failed，不伪造传输成功。
+6. 执行关键词检查和一次 `assembleApp`。
+
+### 结果
+
+构建成功，输出 `BUILD SUCCESSFUL in 12 s 21 ms`。输出仍包含项目既有 deprecated API、异常处理提示、混淆提示和未配置签名警告。
+
+### 验证
+
+已搜索确认新文件中没有 `any`、`unknown`、对象 spread。已执行 `assembleApp`，构建成功。未执行 DevEco Studio Preview、真机或模拟器运行。
+
+### 后续建议
+
+下一轮确认 `@kit.NetworkKit` socket TCP server/client 的完整 ArkTS 签名和权限后，再接入真实监听、连接、发送请求和接收 response。
 
 ## 2026-07-09 19:04 - 投送倒计时独立组件构建记录
 

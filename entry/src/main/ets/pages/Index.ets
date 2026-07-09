@@ -19,6 +19,7 @@ import { TransferImportPreview, decodeTransferPackage, encodeTransferPackage, me
 import { supportedPlatformSummary } from '../common/PlatformTargets';
 import { TransferDiscoveredPeer, searchPeers, startAdvertising, stopAdvertising, stopSearch } from '../common/TransferLanDiscovery';
 import { TransferLanSession, createLocalTransferSession, formatTransferCode, formatRemainingSeconds, isTransferSessionExpired } from '../common/TransferLanSession';
+import { TRANSFER_TEXT_PORT, requestTransferPayload, startTransferServer, stopTransferServer } from '../common/TransferLanTransport';
 
 const LOG_DOMAIN: number = 0x0000;
 const LOG_TAG: string = 'InstantNote';
@@ -96,6 +97,10 @@ struct Index {
   @State private sendSessionState: string = 'select';
   @State private isSendSessionOpen: boolean = false;
   @State private transferSession: TransferLanSession | undefined = undefined;
+  @State private transferServerStatusText: string = '传输服务未启动';
+  @State private mdnsPublishStatusText: string = 'mDNS 服务未发布';
+  @State private localTransportTestText: string = '';
+  @State private localTransportTestPassed: boolean = false;
   @State private receiveSearchState: string = 'idle';
   @State private isSearchingPeers: boolean = false;
   @State private hasSearchedPeers: boolean = false;
@@ -843,11 +848,32 @@ struct Index {
           this.buildSessionCountdownItem('剩余时间', this.sessionExpiresAt());
         }
         .width('100%');
+        Row({ space: 8 }) {
+          this.buildSessionInfoItem('传输服务', this.transferServerStatusText);
+          this.buildSessionInfoItem('mDNS', this.mdnsPublishStatusText);
+        }
+        .width('100%');
         Text(this.sessionPayloadSummaryText())
           .fontSize(12)
           .fontColor(this.palette().textPrimary)
           .lineHeight(17)
           .width('100%');
+        Text('本测试仅验证单机回环传输层，不代表真实跨设备投送成功。')
+          .fontSize(11)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(16)
+          .width('100%');
+        Button('测试本机传输层')
+          .width('100%')
+          .height(36)
+          .backgroundColor(this.palette().accentSoft)
+          .fontColor(this.palette().accentStrong)
+          .borderRadius(12)
+          .onClick(() => {
+            void this.testLocalTransportLayer();
+          });
+        this.buildLocalTransportTestResultCard();
+        this.buildTransferCapabilityStatusCard();
         if (this.sessionHasImageBlocks()) {
           Text('当前版本图片跨设备传输待接入，文本内容可先验证。')
             .fontSize(11)
@@ -933,6 +959,94 @@ struct Index {
     .backgroundColor(this.palette().surface)
     .border({ color: this.palette().border, width: 1 })
     .borderRadius(10);
+  }
+
+  @Builder
+  private buildLocalTransportTestResultCard() {
+    Column({ space: 5 }) {
+      Text('本机传输层测试结果')
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text('该测试仅验证单机回环传输层，不代表真实跨设备投送成功。')
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(16)
+        .width('100%');
+      if (this.localTransportTestText.length > 0) {
+        Text(this.localTransportTestText)
+          .fontSize(12)
+          .fontColor(this.localTransportTestPassed ? this.palette().success : this.palette().textPrimary)
+          .lineHeight(17)
+          .width('100%');
+      } else {
+        Text('尚未执行本机回环测试。')
+          .fontSize(12)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(17)
+          .width('100%');
+      }
+      if (this.localTransportTestPassed) {
+        this.buildLocalTransportCheckItem('已启动本机传输服务');
+        this.buildLocalTransportCheckItem('已校验 sessionId');
+        this.buildLocalTransportCheckItem('已校验 6 位确认码');
+        this.buildLocalTransportCheckItem('已获取文本 payload');
+        this.buildLocalTransportCheckItem('已完成投送包解码');
+        this.buildLocalTransportCheckItem('已生成导入预览');
+        Text(this.localTransportPreviewText())
+          .fontSize(12)
+          .fontColor(this.palette().textMuted)
+          .lineHeight(18)
+          .width('100%');
+        this.buildImportPreviewTitles();
+      }
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(10);
+  }
+
+  @Builder
+  private buildTransferCapabilityStatusCard() {
+    Column({ space: 5 }) {
+      Text('当前能力状态')
+        .fontSize(12)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.palette().textPrimary)
+        .width('100%');
+      Text('已完成：会话确认码、文本 payload、导入预览、本机回环验证')
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(16)
+        .width('100%');
+      Text('待验证：真实双机 mDNS 发现、真实双机 TCP 连接')
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(16)
+        .width('100%');
+      Text('待接入：图片二进制传输')
+        .fontSize(11)
+        .fontColor(this.palette().textMuted)
+        .lineHeight(16)
+        .width('100%');
+    }
+    .width('100%')
+    .padding(10)
+    .backgroundColor(this.palette().surface)
+    .border({ color: this.palette().border, width: 1 })
+    .borderRadius(10);
+  }
+
+  @Builder
+  private buildLocalTransportCheckItem(text: string) {
+    Text(text)
+      .fontSize(11)
+      .fontColor(this.palette().success)
+      .lineHeight(16)
+      .width('100%');
   }
 
   @Builder
@@ -1687,6 +1801,8 @@ struct Index {
     this.hasSearchedPeers = false;
     this.discoveredPeers = [];
     this.receiveSearchError = '';
+    this.transferServerStatusText = hasActiveSession ? this.transferServerStatusText : '传输服务未启动';
+    this.mdnsPublishStatusText = hasActiveSession ? this.mdnsPublishStatusText : 'mDNS 服务未发布';
     this.receivePeerSource = 'mdnsReal';
     this.isDemoDiscoveryMode = false;
     this.isDemoBoundToSendSession = false;
@@ -1699,6 +1815,8 @@ struct Index {
     this.ensureSelectedTransferMemo();
     this.generateTransferPayload();
     this.transferImportText = '';
+    this.localTransportTestText = '';
+    this.localTransportTestPassed = false;
     this.pendingImportMemos = [];
     this.pendingImportPreview = { addCount: 0, updateCount: 0, imageBlockCount: 0 };
     this.feedbackMessage = '';
@@ -1757,10 +1875,17 @@ struct Index {
       await stopAdvertising();
     } catch (error) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop expired LAN advertising. Cause: %{public}s', JSON.stringify(error));
+    }
+    try {
+      await stopTransferServer();
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop expired LAN transfer server. Cause: %{public}s', JSON.stringify(error));
     } finally {
       this.isSendSessionOpen = false;
       this.transferSession = undefined;
       this.sendSessionState = 'failed';
+      this.transferServerStatusText = '传输服务已停止';
+      this.mdnsPublishStatusText = 'mDNS 服务已停止';
       this.feedbackMessage = '投送会话已过期，请重新开启';
       this.clearBoundDemoPeer();
     }
@@ -1805,20 +1930,79 @@ struct Index {
     this.feedbackMessage = '';
   }
 
+  private async testLocalTransportLayer(): Promise<void> {
+    if (this.transferSession === undefined || !this.isSendSessionOpen) {
+      this.localTransportTestText = '请先开启发送会话后再测试本机传输层';
+      this.localTransportTestPassed = false;
+      return;
+    }
+    this.localTransportTestText = '正在测试本机回环传输层...';
+    this.localTransportTestPassed = false;
+    const response = await requestTransferPayload(
+      '127.0.0.1',
+      TRANSFER_TEXT_PORT,
+      this.transferSession.sessionId,
+      this.transferSession.transferCode
+    );
+    if (!response.ok) {
+      this.pendingImportMemos = [];
+      this.pendingImportPreview = { addCount: 0, updateCount: 0, imageBlockCount: 0 };
+      this.localTransportTestText = `本机传输层测试失败：${response.message}`;
+      this.localTransportTestPassed = false;
+      return;
+    }
+    const result = decodeTransferPackage(response.payload);
+    if (!result.success) {
+      this.pendingImportMemos = [];
+      this.pendingImportPreview = { addCount: 0, updateCount: 0, imageBlockCount: 0 };
+      this.localTransportTestText = `本机传输层测试失败：${result.message}`;
+      this.localTransportTestPassed = false;
+      return;
+    }
+    this.pendingImportMemos = result.memos;
+    this.pendingImportPreview = previewTransferImport(this.memos, result.memos);
+    this.localTransportTestText = '本机传输层测试通过。仅完成 payload 请求、解码和导入预览，未合并便签。';
+    this.localTransportTestPassed = true;
+  }
+
   private async openSendSession(): Promise<void> {
     this.generateTransferPayload();
-    const session = createLocalTransferSession(this.getTransferMemosForCurrentScope(), this.localDeviceName());
+    this.localTransportTestText = '';
+    this.localTransportTestPassed = false;
+    const selectedMemos = this.getTransferMemosForCurrentScope();
+    const session = createLocalTransferSession(selectedMemos, this.localDeviceName());
     try {
+      this.transferServerStatusText = '正在启动传输服务';
+      this.mdnsPublishStatusText = 'mDNS 服务未发布';
+      const serverResponse = await startTransferServer(session, selectedMemos);
+      if (!serverResponse.ok) {
+        this.transferSession = undefined;
+        this.isSendSessionOpen = false;
+        this.sendSessionState = 'failed';
+        this.transferServerStatusText = serverResponse.message;
+        this.mdnsPublishStatusText = 'mDNS 服务未发布';
+        this.feedbackMessage = '启动传输服务失败，未发布 mDNS 服务';
+        return;
+      }
+      this.transferServerStatusText = '传输服务已启动';
       await startAdvertising(session);
       this.transferSession = session;
       this.isSendSessionOpen = true;
       this.sendSessionState = 'waiting';
-      this.feedbackMessage = '已开启面对面投送，正在发布附近可发现服务';
+      this.mdnsPublishStatusText = '已发布 mDNS 服务';
+      this.feedbackMessage = '传输服务已启动，已发布 mDNS 服务，等待附近设备连接';
       this.startTransferClock();
     } catch (error) {
+      try {
+        await stopTransferServer();
+      } catch (stopError) {
+        hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop LAN transfer server after send start failure. Cause: %{public}s', JSON.stringify(stopError));
+      }
       this.transferSession = undefined;
       this.isSendSessionOpen = false;
       this.sendSessionState = 'failed';
+      this.transferServerStatusText = '传输服务已停止';
+      this.mdnsPublishStatusText = 'mDNS 服务发布失败';
       this.feedbackMessage = '发布附近服务失败，请确认网络权限和同一 Wi-Fi 后重试';
       hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to start LAN advertising. Cause: %{public}s', JSON.stringify(error));
     }
@@ -1829,10 +2013,19 @@ struct Index {
       await stopAdvertising();
     } catch (error) {
       hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop LAN advertising. Cause: %{public}s', JSON.stringify(error));
+    }
+    try {
+      await stopTransferServer();
+    } catch (error) {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'Failed to stop LAN transfer server. Cause: %{public}s', JSON.stringify(error));
     } finally {
       this.isSendSessionOpen = false;
       this.transferSession = undefined;
       this.sendSessionState = 'select';
+      this.transferServerStatusText = '传输服务已停止';
+      this.mdnsPublishStatusText = 'mDNS 服务已停止';
+      this.localTransportTestText = '';
+      this.localTransportTestPassed = false;
       this.feedbackMessage = '已取消投送';
       this.clearBoundDemoPeer();
       this.stopTransferClock();
@@ -2308,6 +2501,13 @@ struct Index {
       '不包含图片块。';
     const total = this.pendingImportMemos.length;
     return `将导入 ${total} 条便签；新增 ${this.pendingImportPreview.addCount} 条，更新 ${this.pendingImportPreview.updateCount} 条。${imageText}`;
+  }
+
+  private localTransportPreviewText(): string {
+    const imageText = this.pendingImportPreview.imageBlockCount > 0 ?
+      `包含 ${this.pendingImportPreview.imageBlockCount} 个图片块；本机回环测试不传输图片二进制。` :
+      '不包含图片块。';
+    return `预览摘要：${this.pendingImportPreview.addCount} 条新增，${this.pendingImportPreview.updateCount} 条更新。${imageText}`;
   }
 
   private previewImportTitles(): string[] {
